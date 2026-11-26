@@ -424,7 +424,7 @@ MinBtn.Activated:Connect(function()
 end)
 
 -- ============================================================================
--- LOADER ENGINE (ENV-AWARE CLEANUP, SINGLE-ARG LOADSTRING)
+-- LOADER ENGINE (CORE -> CHARACTER(CORE) HANDOFF)
 -- ============================================================================
 local activeController = nil
 local isBusy = false
@@ -528,6 +528,23 @@ local function deployCharacter(charData)
 	isBusy = true
 	cleanupActiveRig()
 
+	-- 1. Fetch & load core.lua to obtain the Core table
+	local coreFn, coreErr = fetchAndCompile("core.lua")
+	if not coreFn then
+		logLine("Failed to load core.lua: " .. tostring(coreErr), THEME.AccentRed)
+		isBusy = false
+		return
+	end
+
+	local okCore, Core = pcall(coreFn)
+	if not okCore or type(Core) ~= "table" then
+		logLine("core.lua error or invalid return: " .. tostring(Core), THEME.AccentRed)
+		isBusy = false
+		return
+	end
+	logLine("core.lua loaded.", THEME.SuccessGreen)
+
+	-- 2. Fetch & load character module
 	local charFn, charErr = fetchAndCompile(charData.path)
 	if not charFn then
 		logLine(tostring(charErr), THEME.AccentRed)
@@ -535,12 +552,32 @@ local function deployCharacter(charData)
 		return
 	end
 
-	logLine("Executing " .. charData.path .. "...", THEME.TextMuted)
-	local okRun, result = pcall(charFn)
-	if not okRun then
-		logLine("Runtime error in " .. charData.path .. ": " .. tostring(result), THEME.AccentRed)
+	local okMod, charModule = pcall(charFn)
+	if not okMod then
+		logLine("Error loading " .. charData.path .. ": " .. tostring(charModule), THEME.AccentRed)
 		isBusy = false
 		return
+	end
+
+	-- 3. Invoke the character factory with Core: return function(Core) ... end
+	local result = charModule
+	if type(charModule) == "function" then
+		logLine("Initializing " .. charData.name .. "(Core)...", THEME.TextMuted)
+		local okInit, initRes = pcall(charModule, Core)
+		if not okInit then
+			logLine("Runtime error in " .. charData.path .. ": " .. tostring(initRes), THEME.AccentRed)
+			isBusy = false
+			return
+		end
+		result = initRes
+	elseif type(charModule) == "table" and type(charModule.init) == "function" then
+		local okInit, initRes = pcall(charModule.init, Core)
+		if not okInit then
+			logLine("Init error in " .. charData.path .. ": " .. tostring(initRes), THEME.AccentRed)
+			isBusy = false
+			return
+		end
+		result = initRes or charModule
 	end
 
 	activeController = result
