@@ -143,12 +143,12 @@ local DEFAULT_CONFIG = {
 		STEP      = { id = "rbxassetid://6870002623",      fallbackId = "rbxasset://sounds/action_footsteps_plastic.mp3", volume = 0.16, pitch = 1.65 },
 	},
 
-	MAX_CREATE_WORKERS = 6,
+	MAX_CREATE_WORKERS = 18,
 	MAX_IN_FLIGHT = 1,
 	SEND_INTERVAL = 0.055,
 	POS_EPS = 0.055,
 	ROT_EPS_DEG = 2.2,
-	SYNC_CHUNK = 30,
+	SYNC_CHUNK = 100,
 	DISABLE_FALLING_DOWN = true,
 	IDLE_TILT_GUARD = true,
 
@@ -203,23 +203,41 @@ end
 local function invokeWithTimeout(ep, timeoutSec, cmd, ...)
 	if not (ep and ep.Parent) then return false, nil end
 	local args = { ... }
-	local done, ok, res = false, false, nil
-	task.spawn(function()
-		ok, res = pcall(ep.InvokeServer, ep, cmd, table.unpack(args))
-		done = true
+	local thread = coroutine.running()
+	local settled = false
+	local ok, res = false, nil
+
+	local timer = task.delay(timeoutSec or 1.5, function()
+		if not settled then
+			settled = true
+			task.spawn(thread, false, nil)
+		end
 	end)
-	local t0 = os.clock()
-	while not done and (os.clock() - t0) < (timeoutSec or 1.5) do
-		task.wait(0.03)
-	end
-	return done and ok or false, res
+
+	task.spawn(function()
+		local callOk, callRes = pcall(ep.InvokeServer, ep, cmd, table.unpack(args))
+		if not settled then
+			settled = true
+			pcall(task.cancel, timer)
+			ok, res = callOk, callRes
+			task.spawn(thread, ok, res)
+		end
+	end)
+
+	return coroutine.yield()
 end
 
 local function chunked(items, size)
+	if #items == 0 then return {} end
+	size = math.max(1, math.floor(size or 100))
+	if #items <= size then return { items } end
+
 	local out = {}
 	for i = 1, #items, size do
 		local sub = {}
-		for j = i, math.min(i + size - 1, #items) do sub[#sub + 1] = items[j] end
+		for j = i, math.min(i + size - 1, #items) do
+			sub[#sub + 1] = items[j]
+		end
 		out[#out + 1] = sub
 	end
 	return out
@@ -228,23 +246,36 @@ end
 local function runParallelBatched(fns, maxWorkers, timeoutSec)
 	local total = #fns
 	if total == 0 then return end
-	local workers = math.min(maxWorkers or (CONFIG and CONFIG.MAX_CREATE_WORKERS) or 6, total)
+	local workers = math.min(maxWorkers or (CONFIG and CONFIG.MAX_CREATE_WORKERS) or 18, total)
 	local nextIdx, finished = 0, 0
+	local thread = coroutine.running()
+	local resumed = false
+
+	local timer = task.delay(timeoutSec or 10, function()
+		if not resumed then
+			resumed = true
+			task.spawn(thread)
+		end
+	end)
+
 	for _ = 1, workers do
 		task.spawn(function()
 			while true do
 				nextIdx += 1
 				local idx = nextIdx
-				if idx > total then break end
+				if idx > total or resumed then break end
 				pcall(fns[idx])
 			end
 			finished += 1
+			if finished >= workers and not resumed then
+				resumed = true
+				pcall(task.cancel, timer)
+				task.spawn(thread)
+			end
 		end)
 	end
-	local t0, limit = os.clock(), (timeoutSec or 10)
-	while finished < workers and (os.clock() - t0) < limit do
-		task.wait()
-	end
+
+	coroutine.yield()
 end
 
 function Core.getState() return STATE end
@@ -1586,7 +1617,7 @@ local function buildTargetProxyRig(ep, targetChar, torso, upperTorso, isR15, rag
 			end
 		end
 	end
-	runParallelBatched(createFns, 8, 8)
+	runParallelBatched(createFns, CONFIG.MAX_CREATE_WORKERS, 8)
 
 	if not rag.active or rag.restoring then
 		local abortDel = {}
@@ -2659,7 +2690,7 @@ setupRig = function()
 		local lockTasks = {}
 		for _, ch in ipairs(chunked(anchorItems, CONFIG.SYNC_CHUNK)) do lockTasks[#lockTasks + 1] = function() f3x(ep, "SyncAnchor", ch) end end
 		for _, ch in ipairs(chunked(colItems, CONFIG.SYNC_CHUNK)) do lockTasks[#lockTasks + 1] = function() f3x(ep, "SyncCollision", ch) end end
-		runParallelBatched(lockTasks, 3, 6)
+		runParallelBatched(lockTasks, CONFIG.MAX_CREATE_WORKERS, 6)
 
 		local syncTasks = {}
 		for _, ch in ipairs(chunked(resizeItems, CONFIG.SYNC_CHUNK)) do syncTasks[#syncTasks + 1] = function() f3x(ep, "SyncResize", ch) end end
@@ -2669,7 +2700,7 @@ setupRig = function()
 		if #hideTexItems > 0 then syncTasks[#syncTasks + 1] = function() f3x(ep, "SyncTexture", hideTexItems) end end
 		if #createMeshItems > 0 then syncTasks[#syncTasks + 1] = function() f3x(ep, "CreateMeshes", createMeshItems) end end
 		if #createLightItems > 0 then syncTasks[#syncTasks + 1] = function() f3x(ep, "CreateLights", createLightItems) end end
-		runParallelBatched(syncTasks, 6, 10)
+		runParallelBatched(syncTasks, CONFIG.MAX_CREATE_WORKERS, 10)
 
 		if not (STATE and STATE.alive and STATE.setupId == mySetupId) then
 			finishAbort(ep, createdThisSetup)
