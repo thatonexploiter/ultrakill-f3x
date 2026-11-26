@@ -5,6 +5,7 @@ return function(Core)
 	local UserInputService = game:GetService("UserInputService")
 	local SoundService = game:GetService("SoundService")
 	local ContentProvider = game:GetService("ContentProvider")
+	local Workspace = game:GetService("Workspace")
 
 	local C, V = Core.C, Core.V
 	local ID_CF, PARK_CF = Core.ID_CF, Core.PARK_CF
@@ -28,6 +29,7 @@ return function(Core)
 		SNAKE_BELLY    = Color3.fromRGB(95, 232, 255),  -- Serpent glowing scales & belly ridge
 		SERPENT_GOLD   = Color3.fromRGB(255, 204, 48),  -- Homing golden Serpent projectile
 		JUDGEMENT_GOLD = Color3.fromRGB(255, 236, 125), -- Parry-flash & Judgement explosion
+		STONE_FALLBACK = Color3.fromRGB(92, 98, 108),   -- Fallback crater rock color
 	}
 
 	-- Exact Proportions Aligned to V1/Core Rig Grounding (MINOS_SOLE_DEPTH = 3.66)
@@ -53,25 +55,27 @@ return function(Core)
 	local COMBO_COOLDOWN = 0.20
 	local COMBO_RANGE = 12.5
 
-	local PUNCH_KNOCKBACK     = { speed = 58,  up = 22, spin = 9.5 }
-	local UPPERCUT_KNOCKBACK  = { speed = 40,  up = 72, spin = 13.0 }
+	-- M1 Hitstun Pushes (keep target in front of Minos while visibly moving them)
+	local JAB_KNOCKBACK       = { speed = 14,  up = 6,   spin = 2.5,  duration = 0.10 }
+	local CROSS_KNOCKBACK     = { speed = 16,  up = 8,   spin = -3.5, duration = 0.10 }
+	local HOOK_KNOCKBACK      = { speed = 20,  up = 14,  spin = 7.0,  duration = 0.12 }
+	local UPPERCUT_KNOCKBACK  = { speed = 12,  up = 54,  spin = 6.0,  duration = 0.16 }
+	local PIN_KNOCKBACK       = { speed = 4,   up = -45, spin = 2.0,  duration = 0.16 }
+	local FINISHER_KNOCKBACK  = { speed = 105, up = 46,  spin = 18.0, duration = 0.35 }
+	local WALLSPLAT_KNOCKBACK = { speed = 110, up = 18,  spin = 18.0, duration = 0.35 }
+
+	-- Special Move Knockbacks
+	local PUNCH_KNOCKBACK     = { speed = 58,  up = 22,  spin = 9.5 }
 	local OVERHEAD_KNOCKBACK  = { speed = 64,  up = -34, spin = 12.5 }
-	local FINISHER_KNOCKBACK  = { speed = 96,  up = 38, spin = 16.0 }
-	local SERPENT_KNOCKBACK   = { speed = 84,  up = 32, spin = 14.5 }
-	local JUDGEMENT_KNOCKBACK = { speed = 118, up = 52, spin = 19.0 }
-	local DIE_KNOCKBACK       = { speed = 92,  up = 30, spin = 15.0 }
-	local CRUSH_KNOCKBACK     = { speed = 82,  up = 54, spin = 16.0 }
+	local SERPENT_KNOCKBACK   = { speed = 84,  up = 32,  spin = 14.5 }
+	local JUDGEMENT_KNOCKBACK = { speed = 118, up = 52,  spin = 19.0 }
+	local DIE_KNOCKBACK       = { speed = 92,  up = 30,  spin = 15.0 }
+	local CRUSH_KNOCKBACK     = { speed = 82,  up = 54,  spin = 16.0 }
 
 	-------------------------------------------------------------------
 	-- VERIFIED ROBLOX AUDIO IDS + OPTIONAL LOCAL EXECUTOR CLIP HOOKS
 	-------------------------------------------------------------------
 	local MINOS_AUDIO = {
-		INTRO = {
-			ids = { "rbxassetid://74387685521172" },
-			file = "minos_intro.mp3",
-			vol = 0.88,
-			pitch = 1.0,
-		},
 		PREPARE = {
 			ids = { "rbxassetid://86759992415245", "rbxassetid://18553892205" },
 			file = "minos_prepare.mp3",
@@ -102,7 +106,6 @@ return function(Core)
 			vol = 0.92,
 			pitch = 1.0,
 		},
-		-- Optional local executor files if supplied in workspace (no unverified IDs guessed)
 		DIE = {
 			ids = {},
 			file = "minos_die.mp3",
@@ -141,7 +144,6 @@ return function(Core)
 		local preloaded = {}
 		local activeSounds = {}
 
-		-- Preload verified Roblox sound IDs silently
 		task.spawn(function()
 			local instances = {}
 			for key, def in pairs(MINOS_AUDIO) do
@@ -231,7 +233,117 @@ return function(Core)
 	end
 
 	-------------------------------------------------------------------
-	-- SCULPTED MINOS PRIME BLUEPRINTS (1000X ANATOMICAL & PRIME DETAIL)
+	-- GROUND DEBRIS & CRATER STONE SPAWNER
+	-------------------------------------------------------------------
+	local function raycastSurface(origin, dir, excludeList)
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = excludeList or {}
+		params.IgnoreWater = true
+		return Workspace:Raycast(origin, dir, params)
+	end
+
+	local function getDebrisFolder()
+		local cam = Workspace.CurrentCamera
+		local parentTarget = cam or Workspace
+		local folder = parentTarget:FindFirstChild("Minos_ImpactDebris")
+		if not folder then
+			folder = Instance.new("Folder")
+			folder.Name = "Minos_ImpactDebris"
+			folder.Parent = parentTarget
+		end
+		return folder
+	end
+
+	local function makeDebrisPart(folder, size, color, material, trans, isWedge)
+		local p = Instance.new(isWedge and "WedgePart" or "Part")
+		p.Name = "MinosStone"
+		p.Anchored = true
+		p.CanCollide = false
+		p.CanTouch = false
+		p.CanQuery = false
+		p.CastShadow = true
+		p.Size = size
+		p.Color = color
+		p.Material = material
+		p.Transparency = trans or 0
+		p.Parent = folder
+		return p
+	end
+
+	local function spawnGroundCraterDebris(STATE, c, impactPos, radius, burstCount, includeRing)
+		local folder = getDebrisFolder()
+		local hit = raycastSurface(impactPos + V(0, 4.0, 0), V(0, -14.0, 0), { c, folder })
+		local groundY = hit and hit.Position.Y or (impactPos.Y - 2.6)
+		local groundColor = hit and hit.Instance and hit.Instance.Color or PALETTE.STONE_FALLBACK
+		local groundMat = hit and hit.Instance and hit.Instance.Material or Enum.Material.Slate
+		if groundMat == Enum.Material.Air or groundMat == Enum.Material.Water then
+			groundMat = Enum.Material.Slate
+		end
+
+		local centerPos = V(impactPos.X, groundY, impactPos.Z)
+		local now = os.clock()
+		local list = STATE.custom.debris
+
+		-- Ring of tilted crater stones jutting out from the ground
+		if includeRing then
+			local ringCount = 10
+			for i = 1, ringCount do
+				local ang = (i / ringCount) * math.pi * 2 + (math.random() - 0.5) * 0.25
+				local r = radius * (0.85 + math.random() * 0.28)
+				local outDir = V(math.cos(ang), 0, math.sin(ang))
+				local stonePos = centerPos + outDir * r + V(0, -0.08, 0)
+				local sz = V(0.85 + math.random() * 0.65, 0.55 + math.random() * 0.45, 0.95 + math.random() * 0.70)
+				local useGlow = (i % 3 == 0)
+				local col = useGlow and PALETTE.PRIME_CYAN or groundColor:Lerp(PALETTE.STONE_FALLBACK, 0.25)
+				local mat = useGlow and Enum.Material.Neon or groundMat
+				local part = makeDebrisPart(folder, sz, col, mat, useGlow and 0.22 or 0, (i % 2 == 0))
+				local cf = C(stonePos, stonePos - outDir) * angles(-26 - math.random() * 18, (math.random() - 0.5) * 20, (math.random() - 0.5) * 24)
+				part.CFrame = cf
+
+				list[#list + 1] = {
+					part = part,
+					isStatic = true,
+					birth = now,
+					life = 1.65 + math.random() * 0.45,
+					baseTrans = useGlow and 0.22 or 0,
+					baseCF = cf,
+				}
+			end
+		end
+
+		-- Airborne ballistic rock shards & Prime energy chunks
+		for i = 1, burstCount do
+			local ang = math.random() * math.pi * 2
+			local horizSpeed = 14 + math.random() * 24
+			local upSpeed = 22 + math.random() * 24
+			local vel = V(math.cos(ang) * horizSpeed, upSpeed, math.sin(ang) * horizSpeed)
+			local sz = V(0.32 + math.random() * 0.45, 0.28 + math.random() * 0.42, 0.36 + math.random() * 0.50)
+			local isEnergy = (i % 4 == 0)
+			local col = isEnergy and ((i % 8 == 0) and PALETTE.JUDGEMENT_GOLD or PALETTE.PRIME_CYAN) or groundColor:Lerp(Color3.new(0.25, 0.25, 0.28), math.random() * 0.25)
+			local mat = isEnergy and Enum.Material.Neon or groundMat
+			local part = makeDebrisPart(folder, sz, col, mat, isEnergy and 0.12 or 0, (i % 2 == 1))
+			local startPos = centerPos + V(math.cos(ang) * 0.8, 0.35, math.sin(ang) * 0.8)
+			local cf = C(startPos) * angles(math.random(0, 360), math.random(0, 360), math.random(0, 360))
+			part.CFrame = cf
+
+			list[#list + 1] = {
+				part = part,
+				isStatic = false,
+				pos = startPos,
+				vel = vel,
+				rot = V(math.random(-360, 360), math.random(-360, 360), math.random(-360, 360)),
+				rotVel = V(math.random(-420, 420), math.random(-420, 420), math.random(-420, 420)),
+				groundY = groundY + sz.Y * 0.35,
+				birth = now,
+				life = 1.15 + math.random() * 0.55,
+				baseTrans = isEnergy and 0.12 or 0,
+			}
+		end
+	end
+
+	-------------------------------------------------------------------
+	-- SCULPTED MINOS PRIME BLUEPRINTS
 	-------------------------------------------------------------------
 	local function getMinosHeadSpecs()
 		local specs = {
@@ -243,7 +355,7 @@ return function(Core)
 			{ partType = "Normal",   size = V(0.06, 0.40, 0.06), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.04, relCF = C(-0.14, -0.40, 0.04) * angles(-8, 0, -10) },
 			{ partType = "Normal",   size = V(0.06, 0.40, 0.06), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.04, relCF = C(0.14, -0.40, 0.04) * angles(-8, 0, 10) },
 
-			-- True Recessed Hollow Pitch-Black Face Abyss (cannot see out the sides or back!)
+			-- True Recessed Hollow Pitch-Black Face Abyss
 			{ partType = "Cylinder", size = V(0.46, 0.54, 0.54), color = PALETTE.FACE_VOID, mat = Enum.Material.SmoothPlastic, trans = 0, relCF = C(0, 0.03, -0.10) * angles(0, 90, 0) },
 			{ partType = "Normal",   size = V(0.50, 0.58, 0.16), color = PALETTE.FACE_VOID, mat = Enum.Material.SmoothPlastic, trans = 0, relCF = C(0, 0.03, 0.04) },
 			{ partType = "Normal",   size = V(0.46, 0.56, 0.24), color = PALETTE.FACE_VOID, mat = Enum.Material.SmoothPlastic, trans = 0, relCF = C(0, 0.03, -0.22) },
@@ -251,39 +363,31 @@ return function(Core)
 			-- Sculpted Skull Dome, Zygomatic Cheekbones, Brow Ridge & Chiseled Jaw
 			{ partType = "Normal",   size = V(0.84, 0.78, 0.36), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.30, relCF = C(0, 0.06, 0.24) },
 			{ partType = "Ball",     size = V(0.82, 0.72, 0.68), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.36, relCF = C(0, 0.08, 0.14) },
-			-- Cheek & Temple Side Walls Framing the Void
 			{ partType = "Normal",   size = V(0.18, 0.72, 0.58), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.22, relCF = C(-0.34, 0.04, -0.06) },
 			{ partType = "Normal",   size = V(0.18, 0.72, 0.58), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.22, relCF = C(0.34, 0.04, -0.06) },
 			{ partType = "Wedge",    size = V(0.22, 0.24, 0.26), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.20, relCF = C(-0.27, -0.10, -0.32) * angles(0, 22, -16) },
 			{ partType = "Wedge",    size = V(0.22, 0.24, 0.26), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.20, relCF = C(0.27, -0.10, -0.32) * angles(0, -22, 16) },
-			-- Overhanging Aggressive Brow Ridge
 			{ partType = "Normal",   size = V(0.86, 0.16, 0.52), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.18, relCF = C(0, 0.37, -0.10) },
 			{ partType = "Wedge",    size = V(0.80, 0.16, 0.22), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.26, relCF = C(0, 0.37, -0.34) },
-			-- Chiseled Jawline & Chin
 			{ partType = "Normal",   size = V(0.60, 0.15, 0.44), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.20, relCF = C(0, -0.28, -0.12) },
 			{ partType = "Wedge",    size = V(0.56, 0.16, 0.22), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.26, relCF = C(0, -0.29, -0.33) * angles(180, 0, 0) },
-			-- Glowing Neural Brainstem Inside Translucent Rear Skull
 			{ partType = "Ball",     size = V(0.28, 0.34, 0.28), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.08, relCF = C(0, 0.08, 0.24), light = true },
 
 			-- 2-Tier Architectural Crown Collar + 13 Uneven Fortress Prisms + Inner Energy Seams
 			{ partType = "Normal",   size = V(0.90, 0.14, 0.88), color = PALETTE.CROWN_ICE,   mat = Enum.Material.Glass,         trans = 0.22, relCF = C(0, 0.47, 0.04) },
 			{ partType = "Normal",   size = V(0.80, 0.11, 0.78), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(0, 0.54, 0.04) },
-			-- Front Crown Battlements
 			{ partType = "Normal",   size = V(0.16, 0.88, 0.16), color = PALETTE.CROWN_ICE,   mat = Enum.Material.Glass,         trans = 0.20, relCF = C(0.00, 0.94, -0.34) * angles(-6, 0, 0) },
 			{ partType = "Normal",   size = V(0.14, 0.62, 0.16), color = PALETTE.CROWN_ICE,   mat = Enum.Material.Glass,         trans = 0.22, relCF = C(-0.18, 0.82, -0.33) * angles(-5, 8, 3) },
 			{ partType = "Normal",   size = V(0.14, 0.68, 0.16), color = PALETTE.CROWN_ICE,   mat = Enum.Material.Glass,         trans = 0.22, relCF = C(0.18, 0.85, -0.33) * angles(-5, -8, -3) },
 			{ partType = "Normal",   size = V(0.17, 1.06, 0.17), color = PALETTE.CROWN_ICE,   mat = Enum.Material.Glass,         trans = 0.20, relCF = C(-0.34, 1.02, -0.24) * angles(-4, 20, 6) },
 			{ partType = "Normal",   size = V(0.17, 0.98, 0.17), color = PALETTE.CROWN_ICE,   mat = Enum.Material.Glass,         trans = 0.20, relCF = C(0.34, 0.98, -0.24) * angles(-4, -20, -6) },
-			-- Side Crown Towers
 			{ partType = "Normal",   size = V(0.16, 0.72, 0.18), color = PALETTE.CROWN_ICE,   mat = Enum.Material.Glass,         trans = 0.22, relCF = C(-0.38, 0.86, 0.04) * angles(0, 0, 7) },
 			{ partType = "Normal",   size = V(0.16, 0.78, 0.18), color = PALETTE.CROWN_ICE,   mat = Enum.Material.Glass,         trans = 0.22, relCF = C(0.38, 0.89, 0.04) * angles(0, 0, -7) },
 			{ partType = "Normal",   size = V(0.16, 0.86, 0.18), color = PALETTE.CROWN_ICE,   mat = Enum.Material.Glass,         trans = 0.22, relCF = C(-0.35, 0.94, 0.26) * angles(6, -14, 6) },
 			{ partType = "Normal",   size = V(0.16, 0.92, 0.18), color = PALETTE.CROWN_ICE,   mat = Enum.Material.Glass,         trans = 0.22, relCF = C(0.35, 0.97, 0.26) * angles(6, 14, -6) },
-			-- Tall Rear Crown Spires
 			{ partType = "Normal",   size = V(0.19, 1.14, 0.19), color = PALETTE.CROWN_ICE,   mat = Enum.Material.Glass,         trans = 0.20, relCF = C(-0.18, 1.06, 0.36) * angles(8, 0, 3) },
 			{ partType = "Normal",   size = V(0.19, 0.98, 0.19), color = PALETTE.CROWN_ICE,   mat = Enum.Material.Glass,         trans = 0.20, relCF = C(0.18, 0.98, 0.36) * angles(8, 0, -3) },
 			{ partType = "Normal",   size = V(0.15, 0.74, 0.17), color = PALETTE.CROWN_ICE,   mat = Enum.Material.Glass,         trans = 0.22, relCF = C(0.00, 0.86, 0.38) * angles(9, 0, 0) },
-			-- Inner Cyan Refraction Cores Inside Primary Crown Spires
 			{ partType = "Normal",   size = V(0.05, 0.64, 0.05), color = PALETTE.PRIME_CYAN,  mat = Enum.Material.Neon,          trans = 0.16, relCF = C(0.00, 0.90, -0.34) * angles(-6, 0, 0) },
 			{ partType = "Normal",   size = V(0.05, 0.78, 0.05), color = PALETTE.PRIME_CYAN,  mat = Enum.Material.Neon,          trans = 0.16, relCF = C(-0.34, 0.96, -0.24) * angles(-4, 20, 6) },
 			{ partType = "Normal",   size = V(0.05, 0.74, 0.05), color = PALETTE.PRIME_CYAN,  mat = Enum.Material.Neon,          trans = 0.16, relCF = C(0.34, 0.94, -0.24) * angles(-4, -20, -6) },
@@ -294,14 +398,13 @@ return function(Core)
 
 	local function getMinosChestSpecs()
 		return {
-			-- Translucent Outer Thoracic Shell + V-Taper Lats + Back Scapulae
 			{ partType = "Normal",   size = V(1.74, 0.88, 0.76), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.38, relCF = C(0, 0.12, 0.02) },
 			{ partType = "Wedge",    size = V(0.38, 0.76, 0.66), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.36, relCF = C(-0.84, 0.06, 0.04) * angles(180, 90, 0) },
 			{ partType = "Wedge",    size = V(0.38, 0.76, 0.66), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.36, relCF = C(0.84, 0.06, 0.04) * angles(180, -90, 0) },
 			{ partType = "Wedge",    size = V(0.68, 0.68, 0.24), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(-0.46, 0.14, 0.36) * angles(0, 168, 180) },
 			{ partType = "Wedge",    size = V(0.68, 0.68, 0.24), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(0.46, 0.14, 0.36) * angles(0, -168, 180) },
 
-			-- Sculpted Pectoralis Major Plates (Upper + Lower Pec Bevels)
+			-- Sculpted Pectoralis Major Plates
 			{ partType = "Normal",   size = V(0.76, 0.44, 0.20), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(-0.44, 0.22, -0.34) * angles(-6, 10, 0) },
 			{ partType = "Normal",   size = V(0.76, 0.44, 0.20), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(0.44, 0.22, -0.34) * angles(-6, -10, 0) },
 			{ partType = "Wedge",    size = V(0.74, 0.20, 0.24), color = PALETTE.FLESH_DEEP,  mat = Enum.Material.SmoothPlastic, trans = 0.28, relCF = C(-0.44, -0.04, -0.34) * angles(180, 10, 0) },
@@ -319,14 +422,14 @@ return function(Core)
 			{ partType = "Ball",     size = V(0.48, 0.54, 0.50), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(-1.04, 0.22, 0.00) },
 			{ partType = "Ball",     size = V(0.48, 0.54, 0.50), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(1.04, 0.22, 0.00) },
 
-			-- Oversized Anatomical Exposed Prime Heart (Ventricle + Atrium + Aortic Arch + Pulse Core)
+			-- Oversized Anatomical Exposed Prime Heart
 			{ partType = "Ball",     size = V(0.46, 0.58, 0.42), color = PALETTE.HEART_RED,   mat = Enum.Material.Neon,          trans = 0.02, relCF = C(-0.18, 0.12, -0.06) * angles(8, 0, -14), light = true },
 			{ partType = "Ball",     size = V(0.32, 0.36, 0.30), color = PALETTE.HEART_DARK,  mat = Enum.Material.SmoothPlastic, trans = 0.04, relCF = C(0.02, 0.22, -0.04) },
 			{ partType = "Ball",     size = V(0.28, 0.38, 0.26), color = PALETTE.HEART_CORE,  mat = Enum.Material.Neon,          trans = 0.00, relCF = C(-0.20, 0.10, -0.10) * angles(8, 0, -14) },
 			{ partType = "Cylinder", size = V(0.30, 0.14, 0.14), color = PALETTE.HEART_RED,   mat = Enum.Material.Neon,          trans = 0.02, relCF = C(-0.08, 0.40, -0.04) * angles(0, 0, 68) },
 			{ partType = "Cylinder", size = V(0.22, 0.11, 0.11), color = PALETTE.HEART_DARK,  mat = Enum.Material.SmoothPlastic, trans = 0.02, relCF = C(0.06, 0.38, -0.02) * angles(0, 0, 112) },
 
-			-- Branching Circulatory System (Aortic Trunk, Subclavian Arms, Rib Branches & Dorsal Spine)
+			-- Branching Circulatory System + Glowing Dorsal Spine
 			{ partType = "Normal",   size = V(0.10, 0.62, 0.10), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.04, relCF = C(-0.02, 0.00, -0.06) * angles(0, 0, -16), light = true },
 			{ partType = "Normal",   size = V(0.08, 0.68, 0.08), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.05, relCF = C(0.32, 0.30, -0.06) * angles(0, 0, 66) },
 			{ partType = "Normal",   size = V(0.08, 0.66, 0.08), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.05, relCF = C(-0.42, 0.28, -0.04) * angles(0, 0, -64) },
@@ -335,7 +438,6 @@ return function(Core)
 			{ partType = "Normal",   size = V(0.05, 0.48, 0.05), color = PALETTE.VEIN_THIN,   mat = Enum.Material.Neon,          trans = 0.06, relCF = C(0.38, -0.02, -0.10) * angles(0, 0, 46) },
 			{ partType = "Normal",   size = V(0.05, 0.48, 0.05), color = PALETTE.VEIN_THIN,   mat = Enum.Material.Neon,          trans = 0.06, relCF = C(-0.44, -0.06, -0.10) * angles(0, 0, -44) },
 			{ partType = "Normal",   size = V(0.05, 0.46, 0.05), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.06, relCF = C(0.08, 0.36, 0.08) * angles(12, 0, 14) },
-			-- Glowing Segmented Dorsal Spine Column
 			{ partType = "Cylinder", size = V(0.86, 0.16, 0.16), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.08, relCF = C(0, 0.12, 0.18) * angles(0, 0, 90) },
 			{ partType = "Normal",   size = V(0.24, 0.10, 0.18), color = PALETTE.PRIME_CYAN,  mat = Enum.Material.Neon,          trans = 0.06, relCF = C(0, 0.42, 0.24) },
 			{ partType = "Normal",   size = V(0.24, 0.10, 0.18), color = PALETTE.PRIME_CYAN,  mat = Enum.Material.Neon,          trans = 0.06, relCF = C(0, 0.20, 0.24) },
@@ -346,7 +448,6 @@ return function(Core)
 
 	local function getMinosAbdomenSpecs()
 		return {
-			-- Tapered Core Shell + Sculpted 6-Pack Abs + External Obliques
 			{ partType = "Normal",   size = V(1.22, 0.86, 0.62), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.38, relCF = ID_CF },
 			{ partType = "Normal",   size = V(0.34, 0.20, 0.14), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(-0.20, 0.26, -0.28) * angles(-4, 6, 0) },
 			{ partType = "Normal",   size = V(0.34, 0.20, 0.14), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(0.20, 0.26, -0.28) * angles(-4, -6, 0) },
@@ -354,10 +455,8 @@ return function(Core)
 			{ partType = "Normal",   size = V(0.32, 0.20, 0.14), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(0.19, 0.02, -0.28) * angles(0, -6, 0) },
 			{ partType = "Normal",   size = V(0.30, 0.22, 0.14), color = PALETTE.FLESH_DEEP,  mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(-0.17, -0.22, -0.26) * angles(6, 6, 0) },
 			{ partType = "Normal",   size = V(0.30, 0.22, 0.14), color = PALETTE.FLESH_DEEP,  mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(0.17, -0.22, -0.26) * angles(6, -6, 0) },
-			-- Angled External Obliques
 			{ partType = "Wedge",    size = V(0.24, 0.68, 0.44), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.28, relCF = C(-0.56, 0.00, 0.00) * angles(180, 90, 0) },
 			{ partType = "Wedge",    size = V(0.24, 0.68, 0.44), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.28, relCF = C(0.56, 0.00, 0.00) * angles(180, -90, 0) },
-			-- Descending Aorta + Iliac Bifurcation + Lower Spine
 			{ partType = "Normal",   size = V(0.10, 0.82, 0.10), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.04, relCF = C(0, 0.04, -0.06) },
 			{ partType = "Normal",   size = V(0.06, 0.56, 0.06), color = PALETTE.VEIN_THIN,   mat = Enum.Material.Neon,          trans = 0.06, relCF = C(-0.16, -0.18, -0.08) * angles(0, 0, -24) },
 			{ partType = "Normal",   size = V(0.06, 0.56, 0.06), color = PALETTE.VEIN_THIN,   mat = Enum.Material.Neon,          trans = 0.06, relCF = C(0.16, -0.18, -0.08) * angles(0, 0, 24) },
@@ -371,12 +470,10 @@ return function(Core)
 		return {
 			{ partType = "Normal",   size = V(1.26, 0.44, 0.62), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.34, relCF = C(0, 0.00, 0) },
 			{ partType = "Wedge",    size = V(0.68, 0.38, 0.30), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(0, -0.06, -0.24) * angles(180, 0, 0) },
-			-- Iliac Crest & Glute Contours
 			{ partType = "Wedge",    size = V(0.24, 0.34, 0.54), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(-0.56, 0.06, 0.02) * angles(0, 90, 0) },
 			{ partType = "Wedge",    size = V(0.24, 0.34, 0.54), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(0.56, 0.06, 0.02) * angles(0, -90, 0) },
 			{ partType = "Ball",     size = V(0.56, 0.44, 0.46), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(-0.32, -0.06, 0.18) },
 			{ partType = "Ball",     size = V(0.56, 0.44, 0.46), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(0.32, -0.06, 0.18) },
-			-- Femoral Vein Bifurcation & Hip Axle
 			{ partType = "Cylinder", size = V(1.06, 0.18, 0.18), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.06, relCF = C(0, -0.10, -0.04) },
 			{ partType = "Normal",   size = V(0.07, 0.38, 0.07), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.05, relCF = C(-0.24, -0.04, -0.06) * angles(0, 0, -48) },
 			{ partType = "Normal",   size = V(0.07, 0.38, 0.07), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.05, relCF = C(0.24, -0.04, -0.06) * angles(0, 0, 48) },
@@ -386,13 +483,10 @@ return function(Core)
 	local function getMinosUpperArmSpecs(side)
 		return {
 			{ partType = "Normal", size = V(0.50, 0.96, 0.50), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.34, relCF = C(0, -0.50, 0) },
-			-- Biceps Peak (front) & Triceps Horseshoe (rear)
 			{ partType = "Ball",   size = V(0.42, 0.62, 0.40), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(0, -0.46, -0.08) },
 			{ partType = "Ball",   size = V(0.40, 0.58, 0.38), color = PALETTE.FLESH_DEEP,  mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(0, -0.44, 0.10) },
-			-- Branching Brachial Artery
 			{ partType = "Normal", size = V(0.08, 0.86, 0.08), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.04, relCF = C(-side * 0.06, -0.48, -0.06) },
 			{ partType = "Normal", size = V(0.05, 0.42, 0.05), color = PALETTE.VEIN_THIN,   mat = Enum.Material.Neon,          trans = 0.06, relCF = C(side * 0.06, -0.64, -0.08) * angles(0, 0, side * 18) },
-			-- Sculpted Elbow Joint
 			{ partType = "Ball",   size = V(0.36, 0.36, 0.36), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.30, relCF = C(0, -MINOS_UPPER_ARM_LEN, 0) },
 			{ partType = "Ball",   size = V(0.22, 0.22, 0.22), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(0, -MINOS_UPPER_ARM_LEN, 0.06) },
 		}
@@ -400,13 +494,11 @@ return function(Core)
 
 	local function getMinosForearmSpecs(side)
 		local specs = {
-			-- Tapered Forearm Shell + Brachioradialis Muscle + Ulnar Vein
 			{ partType = "Normal", size = V(0.42, 0.94, 0.42), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.34, relCF = C(0, -0.48, 0) },
 			{ partType = "Wedge",  size = V(0.34, 0.62, 0.22), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(side * 0.06, -0.36, -0.10) * angles(180, 0, side * 8) },
 			{ partType = "Normal", size = V(0.07, 0.84, 0.07), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.05, relCF = C(-side * 0.04, -0.48, -0.04) },
 		}
 
-		-- True Parametric 3D Helical Coiled Serpent (12 Smooth Tangent Segments + Glowing Belly)
 		local coils = 12
 		local turns = 2.65
 		local rBase = 0.265
@@ -426,7 +518,6 @@ return function(Core)
 			local pMid = (p0 + p1) * 0.5
 			local segLen = (p1 - p0).Magnitude * 1.18
 			local thickness = lerp(0.11, 0.16, math.sin(fracMid * math.pi * 0.82))
-			local segCF = C(pMid, p1)
 
 			specs[#specs + 1] = {
 				partType = "Normal",
@@ -434,7 +525,7 @@ return function(Core)
 				color = PALETTE.SNAKE_SHELL,
 				mat = Enum.Material.SmoothPlastic,
 				trans = 0.04,
-				relCF = segCF,
+				relCF = C(pMid, p1),
 			}
 			specs[#specs + 1] = {
 				partType = "Normal",
@@ -447,7 +538,6 @@ return function(Core)
 			lastPos = p1
 		end
 
-		-- Tapered Serpent Tail Tip Near Elbow
 		local tailAng = (side == 1 and 0 or math.pi)
 		local tailP0 = V(math.cos(tailAng) * rBase, -0.14, math.sin(tailAng) * rBase)
 		local tailP1 = V(math.cos(tailAng - 0.45 * side) * (rBase * 0.88), -0.02, math.sin(tailAng - 0.45 * side) * (rBase * 0.88))
@@ -460,7 +550,6 @@ return function(Core)
 			relCF = C((tailP0 + tailP1) * 0.5, tailP1),
 		}
 
-		-- Sculpted Open-Jawed Viper Head Perched at the Outer Wrist
 		local headOrigin = lastPos or V(side * 0.24, -0.84, -0.14)
 		local headLook = headOrigin + V(side * 0.16, -0.22, -0.62)
 		local headBaseCF = C(headOrigin + V(side * 0.04, 0.00, -0.12), headLook)
@@ -474,12 +563,10 @@ return function(Core)
 
 	local function getMinosHandSpecs(side)
 		return {
-			-- Wrist Collar + Contoured Palm + Glowing Energy Node
 			{ partType = "Cylinder", size = V(0.16, 0.34, 0.34), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.30, relCF = C(0, -0.04, 0) * angles(0, 0, 90) },
 			{ partType = "Normal",   size = V(0.36, 0.26, 0.40), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.30, relCF = C(0, -0.16, 0) },
 			{ partType = "Normal",   size = V(0.38, 0.10, 0.42), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.20, relCF = C(0, -0.26, -0.02) },
 			{ partType = "Ball",     size = V(0.14, 0.14, 0.14), color = PALETTE.PRIME_CYAN,  mat = Enum.Material.Neon,          trans = 0.04, relCF = C(-side * 0.04, -0.18, -0.10) },
-			-- Curled Boxer Fingers & Opposable Thumb
 			{ partType = "Normal",   size = V(0.36, 0.14, 0.24), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.20, relCF = C(0, -0.34, -0.14) * angles(-26, 0, 0) },
 			{ partType = "Normal",   size = V(0.34, 0.12, 0.20), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.28, relCF = C(0, -0.37, -0.02) * angles(-78, 0, 0) },
 			{ partType = "Normal",   size = V(0.13, 0.22, 0.14), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.22, relCF = C(-side * 0.20, -0.24, -0.16) * angles(-38, 0, side * -28) },
@@ -490,12 +577,10 @@ return function(Core)
 		return {
 			{ partType = "Ball",     size = V(0.46, 0.46, 0.46), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.34, relCF = ID_CF },
 			{ partType = "Normal",   size = V(0.58, 1.06, 0.58), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.34, relCF = C(0, -0.58, 0) },
-			-- Sculpted Quadriceps (Vastus Lateralis Sweep, Rectus Femoris, Vastus Medialis) + Hamstring
 			{ partType = "Wedge",    size = V(0.30, 0.72, 0.26), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(side * 0.14, -0.48, -0.22) * angles(8, side * -12, 0) },
 			{ partType = "Ball",     size = V(0.42, 0.72, 0.36), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(0, -0.46, -0.10) },
 			{ partType = "Ball",     size = V(0.30, 0.36, 0.28), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(-side * 0.14, -0.82, -0.16) },
 			{ partType = "Ball",     size = V(0.44, 0.68, 0.38), color = PALETTE.FLESH_DEEP,  mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(0, -0.54, 0.12) },
-			-- Femoral Artery & Knee Joint + Patella
 			{ partType = "Normal",   size = V(0.09, 1.00, 0.09), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.04, relCF = C(-side * 0.08, -0.58, -0.06) },
 			{ partType = "Normal",   size = V(0.05, 0.56, 0.05), color = PALETTE.VEIN_THIN,   mat = Enum.Material.Neon,          trans = 0.06, relCF = C(side * 0.10, -0.72, -0.08) * angles(0, 0, side * 14) },
 			{ partType = "Cylinder", size = V(0.38, 0.30, 0.30), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.30, relCF = C(0, -MINOS_THIGH_LEN, 0) },
@@ -507,11 +592,9 @@ return function(Core)
 		return {
 			{ partType = "Ball",     size = V(0.36, 0.36, 0.36), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.34, relCF = ID_CF },
 			{ partType = "Normal",   size = V(0.46, 1.04, 0.46), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.34, relCF = C(0, -0.58, 0) },
-			-- Sharp Tibia Ridge + Double-Headed Gastrocnemius Calf + Achilles Taper
 			{ partType = "Wedge",    size = V(0.24, 0.88, 0.18), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(0, -0.58, -0.20) * angles(180, 0, 0) },
 			{ partType = "Ball",     size = V(0.44, 0.56, 0.42), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(0, -0.38, 0.14) },
 			{ partType = "Wedge",    size = V(0.24, 0.54, 0.20), color = PALETTE.FLESH_DEEP,  mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(0, -0.82, 0.14) * angles(180, 180, 0) },
-			-- Tibial Artery & Ankle Joint
 			{ partType = "Normal",   size = V(0.08, 0.96, 0.08), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,          trans = 0.04, relCF = C(-side * 0.04, -0.58, -0.04) },
 			{ partType = "Normal",   size = V(0.05, 0.46, 0.05), color = PALETTE.VEIN_THIN,   mat = Enum.Material.Neon,          trans = 0.06, relCF = C(side * 0.06, -0.44, 0.06) * angles(0, 0, side * -14) },
 			{ partType = "Cylinder", size = V(0.30, 0.26, 0.26), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass,         trans = 0.30, relCF = C(0, -MINOS_SHIN_LEN, 0) },
@@ -530,14 +613,12 @@ return function(Core)
 
 	local function getSerpentProjectileSpecs()
 		local specs = {
-			-- Seg 0: Articulated Golden Viper Head + Flaring Hood Fins + Glowing Eyes
 			{ key = "seg0", partType = "Wedge",  size = V(0.54, 0.34, 0.98), color = PALETTE.SERPENT_GOLD,   mat = Enum.Material.Neon, trans = 0.00, relCF = C(0, 0.10, -0.18) * angles(6, 0, 0), light = true },
 			{ key = "seg0", partType = "Wedge",  size = V(0.42, 0.20, 0.80), color = PALETTE.JUDGEMENT_GOLD, mat = Enum.Material.Neon, trans = 0.00, relCF = C(0, -0.14, -0.14) * angles(196, 0, 0) },
 			{ key = "seg0", partType = "Wedge",  size = V(0.18, 0.42, 0.66), color = PALETTE.PRIME_CYAN,     mat = Enum.Material.Neon, trans = 0.10, relCF = C(-0.34, 0.08, 0.18) * angles(-8, -22, 34) },
 			{ key = "seg0", partType = "Wedge",  size = V(0.18, 0.42, 0.66), color = PALETTE.PRIME_CYAN,     mat = Enum.Material.Neon, trans = 0.10, relCF = C(0.34, 0.08, 0.18) * angles(-8, 22, -34) },
 			{ key = "seg0", partType = "Normal", size = V(0.58, 0.10, 0.16), color = PALETTE.AURA_WHITE,     mat = Enum.Material.Neon, trans = 0.00, relCF = C(0, 0.16, -0.24) },
 		}
-		-- Seg 1..7: Undulating Tapering Golden Spine + Cyan Dorsal Ridge
 		for i = 1, 7 do
 			local frac = i / 7
 			local w = lerp(0.46, 0.18, frac)
@@ -561,7 +642,6 @@ return function(Core)
 				relCF = C(0, w * 0.52, 0.08) * angles(0, 180, 0),
 			}
 		end
-		-- Seg 8: Forked Tail Fin
 		specs[#specs + 1] = { key = "seg8", partType = "Wedge", size = V(0.14, 0.34, 0.82), color = PALETTE.PRIME_CYAN,   mat = Enum.Material.Neon, trans = 0.16, relCF = C(-0.10, 0, 0) * angles(0, 180, 24) }
 		specs[#specs + 1] = { key = "seg8", partType = "Wedge", size = V(0.14, 0.34, 0.82), color = PALETTE.SERPENT_GOLD, mat = Enum.Material.Neon, trans = 0.16, relCF = C(0.10, 0, 0) * angles(0, 180, -24) }
 		return specs
@@ -692,6 +772,7 @@ return function(Core)
 			STATE.custom.wasSlamming = false
 			STATE.custom.slamKind = "CRUSH"
 			STATE.custom.slamDir = V(0, -1, 0)
+			STATE.custom.debris = {}
 
 			STATE.custom.serpent = {
 				active = false,
@@ -728,9 +809,12 @@ return function(Core)
 				lastUsed = 0,
 				startTime = 0,
 				hitDone = false,
+				detonateDone = false,
 				uppercut = false,
 				followup = false,
 				lungeDone = false,
+				pinTarget = nil,
+				pinPos = V(0, 0, 0),
 			}
 
 			STATE.custom.blitz = {
@@ -765,29 +849,31 @@ return function(Core)
 			end
 			STATE.custom.triggerPhase2 = triggerPhase2
 
-			-- Clean previous connections if reloaded
 			if STATE.custom.lmbConn then pcall(function() STATE.custom.lmbConn:Disconnect() end) end
 			if STATE.custom.keyConn then pcall(function() STATE.custom.keyConn:Disconnect() end) end
 			if STATE.custom.diedConn then pcall(function() STATE.custom.diedConn:Disconnect() end) end
 
+			local function cleanupAll()
+				if STATE.custom.lmbConn then pcall(function() STATE.custom.lmbConn:Disconnect() end) STATE.custom.lmbConn = nil end
+				if STATE.custom.keyConn then pcall(function() STATE.custom.keyConn:Disconnect() end) STATE.custom.keyConn = nil end
+				if STATE.custom.diedConn then pcall(function() STATE.custom.diedConn:Disconnect() end) STATE.custom.diedConn = nil end
+				if STATE.custom.audioCleanup then STATE.custom.audioCleanup() end
+				if STATE.custom.debris then
+					for _, d in ipairs(STATE.custom.debris) do
+						if d.part then pcall(function() d.part:Destroy() end) end
+					end
+					table.clear(STATE.custom.debris)
+				end
+			end
+
 			local function isAliveState()
 				local cur = Core.getState()
 				if cur ~= STATE or not cur.alive then
-					if STATE.custom.lmbConn then pcall(function() STATE.custom.lmbConn:Disconnect() end) STATE.custom.lmbConn = nil end
-					if STATE.custom.keyConn then pcall(function() STATE.custom.keyConn:Disconnect() end) STATE.custom.keyConn = nil end
-					if STATE.custom.diedConn then pcall(function() STATE.custom.diedConn:Disconnect() end) STATE.custom.diedConn = nil end
-					if STATE.custom.audioCleanup then STATE.custom.audioCleanup() end
+					cleanupAll()
 					return false
 				end
 				return true
 			end
-
-			-- Intro cue
-			task.delay(0.18, function()
-				if isAliveState() then
-					playVoice("INTRO", 1.0, 0.92)
-				end
-			end)
 
 			-- Death cue
 			local initChar = Core.getChar()
@@ -803,7 +889,7 @@ return function(Core)
 				end)
 			end
 
-			-- LMB Boxing Combo + Auto-Uppercut
+			-- LMB Boxing Combo + Synced Hitstun + 2-Stage Ground-Pin Finisher
 			STATE.custom.lmbConn = UserInputService.InputBegan:Connect(function(input, gp)
 				if not isAliveState() or gp or STATE.isSettingUp then return end
 				if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
@@ -818,15 +904,17 @@ return function(Core)
 				if cb.active and (now - cb.startTime) < (0.14 * cdMult) then return end
 				if (now - cb.lastUsed) < (COMBO_COOLDOWN * cdMult) then return end
 
-				local resetChain = (now - cb.lastUsed) > 1.05
+				local resetChain = (now - cb.lastUsed) > 1.15
 				cb.step = resetChain and 1 or ((cb.step % 4) + 1)
 				cb.active = true
 				cb.lastUsed = now
 				cb.startTime = now
 				cb.hitDone = false
+				cb.detonateDone = false
 				cb.lungeDone = false
 				cb.uppercut = false
 				cb.followup = false
+				cb.pinTarget = nil
 
 				local c = Core.getChar()
 				local hrp = c and c:FindFirstChild("HumanoidRootPart")
@@ -945,14 +1033,13 @@ return function(Core)
 			addMinos("minosFoot", getMinosFootSpecs(), ankleL, "lFoot")
 			addMinos("minosFoot", getMinosFootSpecs(), ankleR, "rFoot")
 
-			-- Articulated 10-Segment Undulating Golden Serpent & Phase 2 Flame Aura
 			addMinos("minosSerpent", getSerpentProjectileSpecs(), PARK_CF)
 			addMinos("minosAura", getMinosAuraSpecs(), PARK_CF)
 
 			return specs
 		end,
 
-		-- [E] / SERPENT: "PREPARE THYSELF!" (2-Kick Crescent Sweep + Homing Slithering Serpent)
+		-- [E] / SERPENT: "PREPARE THYSELF!"
 		onPrimary = function()
 			local STATE = Core.getState()
 			if not (STATE and STATE.alive) or STATE.isSettingUp then return end
@@ -980,7 +1067,7 @@ return function(Core)
 			Core.playSFX("PUNCH", 0.90, 0.95, "PARRY")
 		end,
 
-		-- [F] / JUDGEMENT: "JUDGEMENT!" (Parry-Glint Telegraph -> Teleport -> Explosive Dropkick)
+		-- [F] / JUDGEMENT: "JUDGEMENT!"
 		onSecondary = function()
 			local STATE = Core.getState()
 			if not (STATE and STATE.alive) or STATE.isSettingUp then return end
@@ -1029,6 +1116,34 @@ return function(Core)
 			local dtStep = clamp(now - (STATE.custom.lastStepNow or now), 1 / 240, 0.05)
 			STATE.custom.lastStepNow = now
 
+			-- Step Impact Crater Stones & Ballistic Debris
+			local debrisList = STATE.custom.debris
+			for i = #debrisList, 1, -1 do
+				local d = debrisList[i]
+				local age = now - d.birth
+				if age >= d.life or not d.part or not d.part.Parent then
+					if d.part then pcall(function() d.part:Destroy() end) end
+					table.remove(debrisList, i)
+				else
+					local fadeStart = d.life * 0.58
+					if age > fadeStart then
+						local fadeK = (age - fadeStart) / (d.life - fadeStart)
+						d.part.Transparency = lerp(d.baseTrans, 1, fadeK)
+					end
+					if not d.isStatic then
+						d.vel = d.vel + V(0, -68 * dtStep, 0)
+						d.pos = d.pos + d.vel * dtStep
+						if d.pos.Y <= d.groundY and d.vel.Y < 0 then
+							d.pos = V(d.pos.X, d.groundY, d.pos.Z)
+							d.vel = V(d.vel.X * 0.58, -d.vel.Y * 0.36, d.vel.Z * 0.58)
+							d.rotVel = d.rotVel * 0.55
+						end
+						d.rot = d.rot + d.rotVel * dtStep
+						d.part.CFrame = C(d.pos) * angles(d.rot.X, d.rot.Y, d.rot.Z)
+					end
+				end
+			end
+
 			-- Auto-trigger Phase 2 below 50% HP
 			if hum and hum.MaxHealth > 0 and hum.Health > 0 and (hum.Health / hum.MaxHealth) <= 0.50 then
 				if not STATE.custom.autoPhase2Triggered then
@@ -1063,7 +1178,6 @@ return function(Core)
 				+ math.abs(sinW) * 0.16 * STATE.walkBlend * (1 + STATE.sprintBlend * 0.45)
 				- STATE.landRecover * 0.34
 
-			-- Multi-segment spine angles: Pelvis (hips), Abdomen (waist), Chest (upper torso)
 			local pelvisPitch = -STATE.localFwd * (4 + STATE.sprintBlend * 6) - STATE.landRecover * 8
 			local pelvisYaw   = 26 * idleWeight - cosW * (6 + STATE.sprintBlend * 8) * STATE.walkBlend
 			local pelvisRoll  = -STATE.localStrafe * 8 - STATE.turnRate * 1.8
@@ -1072,7 +1186,6 @@ return function(Core)
 			local torsoYaw    = -6 * idleWeight + cosW * (12 + STATE.sprintBlend * 11) * STATE.walkBlend
 			local torsoRoll   = -STATE.localStrafe * 6 - STATE.turnRate * 1.5
 
-			-- Arm base poses (Bladed Boxer Stance + Driving Sprint Pump)
 			local lShoulderOff = V(0, 0, 0)
 			local rShoulderOff = V(0, 0, 0)
 
@@ -1088,7 +1201,6 @@ return function(Core)
 			local rForePitch  = lerp(32, 88 + guardBobL * 6, idleWeight) + math.max(0, -sinW) * 24 * STATE.walkBlend
 			local rHandPitch, rHandYaw, rHandRoll = -8 * idleWeight, -14 * idleWeight, 12 * idleWeight
 
-			-- Leg base poses (Grounded Martial Stance + Deep Sprint Knee Drive)
 			local lThighP, rThighP = 14 * idleWeight, -16 * idleWeight
 			local lThighY, rThighY = 10 * idleWeight, -10 * idleWeight
 			local lShinP, rShinP = -20 * idleWeight, -14 * idleWeight
@@ -1109,7 +1221,6 @@ return function(Core)
 				local shinTuckL, shinTuckR = -38, -74
 				if STATE.slam.active then
 					if STATE.custom.slamKind == "DIE" then
-						-- "DIE!" Diagonal Flying Rider Kick
 						pelvisPitch = 28
 						torsoPitch = 16
 						pelvisYaw = -22
@@ -1119,7 +1230,6 @@ return function(Core)
 						lUpperPitch, lUpperRoll, lForePitch = -32, 42, 18
 						rUpperPitch, rUpperRoll, rForePitch = 64, -14, 42
 					else
-						-- "CRUSH!" Vertical Meteor Stomp
 						pelvisPitch = -14
 						torsoPitch = -22
 						airTuckL, airTuckR = 54, 46
@@ -1168,8 +1278,7 @@ return function(Core)
 			-- [C] SLAM TRACKING: "DIE!" (RIDER KICK) & "CRUSH!" (VERTICAL SLAM)
 			-------------------------------------------------------------------
 			if STATE.slam.active and not STATE.custom.wasSlamming then
-				-- Rising edge of Slam: determine DIE! vs CRUSH!
-				local tChar, tHRP = findNearestTarget(c, hrp.Position, 65, nil)
+				local _, tHRP = findNearestTarget(c, hrp.Position, 65, nil)
 				local isDie = false
 				if tHRP then
 					local flatDist = V(tHRP.Position.X - hrp.Position.X, 0, tHRP.Position.Z - hrp.Position.Z).Magnitude
@@ -1202,6 +1311,7 @@ return function(Core)
 				Core.spawnRing(hrp.Position - V(0, 2.2, 0), PALETTE.PRIME_CYAN, 1.8, wasDie and 15.0 or 18.5, 0.36)
 				Core.spawnRing(hrp.Position - V(0, 2.1, 0), PALETTE.AURA_WHITE, 1.2, wasDie and 11.0 or 13.5, 0.28)
 				Core.spawnFlash(hrp.Position - V(0, 2.0, 0), PALETTE.PRIME_CYAN, 1.4, 8.0, 0.26)
+				spawnGroundCraterDebris(STATE, c, hrp.Position, wasDie and 4.5 or 5.5, 10, true)
 				Core.addStyleBonus(wasDie and "+DIE!" or "+CRUSH!", wasDie and 190 or 220, PALETTE.PRIME_CYAN)
 				STATE.camShake = math.max(STATE.camShake, wasDie and 0.75 or 0.95)
 				STATE.fovKick = math.max(STATE.fovKick, 10)
@@ -1243,15 +1353,14 @@ return function(Core)
 			end
 
 			-------------------------------------------------------------------
-			-- MOVE 1: [LMB] BOXING COMBO + UPPERCUT + GROUND-PIN FINISHER
+			-- MOVE 1: [LMB] SYNCED HITSTUN BOXING COMBO + 2-STAGE GROUND-PIN FINISHER
 			-------------------------------------------------------------------
 			local cb = STATE.custom.combo
 			if cb.active then
 				local cEl = (now - cb.startTime) * speedScale
-				local dur = (cb.step == 4 and not cb.uppercut) and 0.56 or 0.30
+				local dur = (cb.step == 4 and not cb.uppercut) and 0.62 or 0.30
 				if cEl < dur then
 					if cb.uppercut then
-						-- Deep crouch windup -> explosive skyward Uppercut
 						local w = clamp(cEl / 0.08, 0, 1)
 						local k = easeOutBack(clamp((cEl - 0.06) / 0.16, 0, 1))
 						torsoY -= 0.42 * (1 - k) * w
@@ -1266,7 +1375,7 @@ return function(Core)
 						rHandPitch, rHandRoll = 18 * k, -28 * k
 						lUpperPitch, lForePitch = lerp(lUpperPitch, -28, k), lerp(lForePitch, 48, k)
 					elseif cb.step == 1 then
-						-- Snap Left Jab with Hip-Shoulder Whip
+						-- M1 #1: Left Snap Jab
 						local w = clamp(cEl / 0.05, 0, 1)
 						local k = easeOutBack(clamp(cEl / 0.12, 0, 1))
 						local rec = clamp((cEl - 0.16) / 0.14, 0, 1)
@@ -1282,7 +1391,7 @@ return function(Core)
 						rUpperPitch = lerp(rUpperPitch, 56, w)
 						rForePitch = lerp(rForePitch, 108, w)
 					elseif cb.step == 2 then
-						-- Heavy Right Cross
+						-- M1 #2: Heavy Right Cross
 						local w = clamp(cEl / 0.05, 0, 1)
 						local k = easeOutBack(clamp(cEl / 0.12, 0, 1))
 						local rec = clamp((cEl - 0.16) / 0.14, 0, 1)
@@ -1298,7 +1407,7 @@ return function(Core)
 						lUpperPitch = lerp(lUpperPitch, 52, w)
 						lForePitch = lerp(lForePitch, 108, w)
 					elseif cb.step == 3 then
-						-- Spinning Left Haymaker Hook
+						-- M1 #3: Left Hook (Lateral Whip)
 						local k = easeOutBack(clamp(cEl / 0.14, 0, 1))
 						pelvisYaw = lerp(pelvisYaw, -36, k)
 						torsoYaw = lerp(torsoYaw, -56, k)
@@ -1310,83 +1419,157 @@ return function(Core)
 						lForePitch = lerp(lForePitch, 64, k)
 						lHandRoll = lerp(lHandRoll, -45, k)
 					else
-						-- Step 4 Finisher: Wind-Up Overhead -> Ground-Pin Slam -> Fist Dislodge Recovery
+						-- M1 #4: Windup -> Ground-Pin Impact (0.19s - 0.37s) -> Detonation Rip-Up (0.37s+)
 						if cEl < 0.14 then
 							local w = easeOutQuad(cEl / 0.14)
-							torsoY += 0.24 * w
-							pelvisPitch = lerp(pelvisPitch, 14, w)
-							torsoPitch = lerp(torsoPitch, 20, w)
-							rUpperPitch = lerp(rUpperPitch, 162, w)
-							lUpperPitch = lerp(lUpperPitch, 68, w)
+							torsoY += 0.28 * w
+							pelvisPitch = lerp(pelvisPitch, 16, w)
+							torsoPitch = lerp(torsoPitch, 22, w)
+							rUpperPitch = lerp(rUpperPitch, 166, w)
+							lUpperPitch = lerp(lUpperPitch, 72, w)
 							rForePitch = lerp(rForePitch, 32, w)
-						elseif cEl < 0.40 then
-							local k = easeOutBack(clamp((cEl - 0.14) / 0.10, 0, 1))
-							torsoY -= 0.72 * k
-							pelvisPitch = lerp(pelvisPitch, -24, k)
-							torsoPitch = lerp(torsoPitch, -34, k)
-							torsoYaw = lerp(torsoYaw, 32, k)
-							lThighP, rThighP = lerp(lThighP, 54, k), lerp(rThighP, -36, k)
-							lShinP, rShinP = lerp(lShinP, -68, k), lerp(rShinP, -44, k)
-							rShoulderOff = V(0, -0.14 * k, -0.32 * k)
-							rUpperPitch = lerp(rUpperPitch, 62, k)
-							rForePitch = lerp(rForePitch, 12, k)
-							lUpperPitch = lerp(lUpperPitch, -36, k)
+						elseif cEl < 0.38 then
+							local k = easeOutBack(clamp((cEl - 0.14) / 0.08, 0, 1))
+							torsoY -= 0.78 * k
+							pelvisPitch = lerp(pelvisPitch, -26, k)
+							torsoPitch = lerp(torsoPitch, -38, k)
+							torsoYaw = lerp(torsoYaw, 34, k)
+							lThighP, rThighP = lerp(lThighP, 58, k), lerp(rThighP, -36, k)
+							lShinP, rShinP = lerp(lShinP, -74, k), lerp(rShinP, -44, k)
+							rShoulderOff = V(0, -0.16 * k, -0.34 * k)
+							rUpperPitch = lerp(rUpperPitch, 60, k)
+							rForePitch = lerp(rForePitch, 10, k)
+							lUpperPitch = lerp(lUpperPitch, -40, k)
 							lForePitch = lerp(lForePitch, 44, k)
 						else
-							local rec = easeOutQuad(clamp((cEl - 0.40) / 0.16, 0, 1))
-							torsoY -= 0.72 * (1 - rec)
-							torsoPitch = lerp(-34, 0, rec)
-							rUpperPitch = lerp(62, 42, rec)
+							-- Rip fist out of the ground as the Prime detonation erupts
+							local rec = easeOutBack(clamp((cEl - 0.38) / 0.22, 0, 1))
+							torsoY -= 0.78 * (1 - rec)
+							pelvisPitch = lerp(-26, 8 * (1 - rec), rec)
+							torsoPitch = lerp(-38, 12 * (1 - rec), rec)
+							torsoYaw = lerp(34, 0, rec)
+							rUpperPitch = lerp(60, 128 * (1 - rec * 0.6), rec)
+							rForePitch = lerp(10, 46, rec)
 						end
 					end
 
+					-- Synced Forward Step so Minos advances smoothly with the target's hitstun push
 					if not cb.lungeDone and cEl >= 0.03 then
 						cb.lungeDone = true
-						local tChar, tHRP = findNearestTarget(c, hrp.Position, COMBO_RANGE + 8, nil)
+						local tChar, tHRP = findNearestTarget(c, hrp.Position, COMBO_RANGE + 7, nil)
 						if tHRP then
 							snapTurnTowards(hrp, tHRP.Position, inFP)
 							local d = (tHRP.Position - hrp.Position).Magnitude
-							if d > 4.0 and d < 18.0 then
+							if d > 3.6 and d < 18.0 then
 								local stepDir = V(tHRP.Position.X - hrp.Position.X, 0, tHRP.Position.Z - hrp.Position.Z).Unit
-								hrp.AssemblyLinearVelocity = stepDir * (cb.step == 4 and 46 or 32)
+								hrp.AssemblyLinearVelocity = stepDir * (cb.step == 4 and 32 or 18)
+							elseif d <= 3.6 and cb.step < 4 then
+								hrp.AssemblyLinearVelocity = hrp.CFrame.LookVector * 12
 							end
 						else
-							hrp.AssemblyLinearVelocity = hrp.AssemblyLinearVelocity + hrp.CFrame.LookVector * 16
+							hrp.AssemblyLinearVelocity = hrp.AssemblyLinearVelocity + hrp.CFrame.LookVector * 13
 						end
 					end
 
+					-- Hit Registration (Stage 1 on M1 #4 pins target + spawns ground crater stones)
 					local hitFrame = (cb.step == 4 and not cb.uppercut) and 0.19 or 0.07
 					if not cb.hitDone and cEl >= hitFrame then
 						cb.hitDone = true
 						local tChar, tHRP = findNearestTarget(c, hrp.Position, COMBO_RANGE, hrp.CFrame.LookVector)
-						if tChar and tHRP then
-							local isFinisher = (cb.step == 4 and not cb.uppercut)
-							Core.playSFX("PARRY", isFinisher and 0.78 or 1.06, 0.96)
-							if isFinisher then
-								Core.playSFX("SHATTER", 0.85, 0.95, "PARRY")
-							end
-							Core.triggerHitstop(isFinisher and 0.10 or 0.05, isFinisher and PALETTE.JUDGEMENT_GOLD or PALETTE.PRIME_CYAN)
-							Core.spawnFlash(tHRP.Position, isFinisher and PALETTE.JUDGEMENT_GOLD or PALETTE.PRIME_CYAN, 1.0, isFinisher and 6.4 or 4.0, 0.22)
-							if isFinisher or cb.uppercut then
-								Core.spawnRing(tHRP.Position, isFinisher and PALETTE.JUDGEMENT_GOLD or PALETTE.PRIME_CYAN, 1.1, isFinisher and 9.5 or 6.5, 0.26)
-								Core.fireDualBeams(hrp.Position + V(0, 0.5, 0), (hrp.Position + tHRP.Position) * 0.5, tHRP.Position, PALETTE.PRIME_CYAN, isFinisher and PALETTE.JUDGEMENT_GOLD or PALETTE.AURA_WHITE, 0.18, 0.30, true, 0.18)
-							end
-							if cb.uppercut then
-								hrp.AssemblyLinearVelocity = V(hrp.AssemblyLinearVelocity.X * 0.4, 58, hrp.AssemblyLinearVelocity.Z * 0.4)
-							end
-							local kb = cb.uppercut and UPPERCUT_KNOCKBACK or (isFinisher and FINISHER_KNOCKBACK or PUNCH_KNOCKBACK)
-							Core.applyF3XKnockback(tChar, tHRP.Position - hrp.Position, kb)
-							Core.addStyleBonus(cb.uppercut and "+UPPERCUT!" or (isFinisher and "+THY END IS NOW!" or "+PRIME PUNCH"), isFinisher and 210 or 85, isFinisher and PALETTE.JUDGEMENT_GOLD or PALETTE.PRIME_CYAN)
 
-							if isFinisher and p2 and not cb.followup and not sa.projectileActive then
+						if cb.step == 4 and not cb.uppercut then
+							local punchSpot = (hrp.CFrame * C(0.55, -0.4, -2.6)).Position
+							local impactPos = tHRP and V(tHRP.Position.X, punchSpot.Y, tHRP.Position.Z) or punchSpot
+							cb.pinPos = impactPos
+							cb.pinTarget = tChar
+
+							Core.playSFX("PARRY", 0.80, 0.96)
+							Core.triggerHitstop(0.08, PALETTE.PRIME_CYAN)
+							Core.spawnRing(impactPos - V(0, 1.8, 0), PALETTE.PRIME_CYAN, 1.0, 8.2, 0.24)
+							Core.spawnFlash(impactPos - V(0, 1.2, 0), PALETTE.PRIME_CYAN, 1.0, 5.2, 0.20)
+							STATE.camShake = math.max(STATE.camShake, 0.55)
+
+							-- Spawn Ground Crater Stones + Initial Impact Shards!
+							spawnGroundCraterDebris(STATE, c, impactPos, 3.8, 8, true)
+
+							if tChar and tHRP then
+								Core.applyF3XKnockback(tChar, tHRP.Position - hrp.Position, PIN_KNOCKBACK)
+							end
+						elseif tChar and tHRP then
+							local pushDir = tHRP.Position - hrp.Position
+							local kb = JAB_KNOCKBACK
+							if cb.uppercut then
+								kb = UPPERCUT_KNOCKBACK
+								hrp.AssemblyLinearVelocity = V(hrp.AssemblyLinearVelocity.X * 0.4, 58, hrp.AssemblyLinearVelocity.Z * 0.4)
+							elseif cb.step == 2 then
+								kb = CROSS_KNOCKBACK
+							elseif cb.step == 3 then
+								kb = HOOK_KNOCKBACK
+								pushDir = (hrp.CFrame.LookVector + hrp.CFrame.RightVector * 0.45).Unit
+							end
+
+							Core.playSFX("PARRY", 1.04 + cb.step * 0.04, 0.88)
+							Core.triggerHitstop(cb.uppercut and 0.06 or 0.03, PALETTE.PRIME_CYAN)
+							Core.spawnFlash(tHRP.Position, PALETTE.PRIME_CYAN, 0.85, 3.8, 0.18)
+							if cb.uppercut then
+								Core.spawnRing(tHRP.Position, PALETTE.PRIME_CYAN, 1.0, 6.5, 0.24)
+							end
+							Core.applyF3XKnockback(tChar, pushDir, kb)
+							Core.addStyleBonus(cb.uppercut and "+UPPERCUT!" or "+PRIME PUNCH", 85, PALETTE.PRIME_CYAN)
+						end
+					end
+
+					-- Stage 2 of 4th M1: Delayed Prime Ground Detonation + Wall-Splat Launch + Secondary Shards
+					if cb.step == 4 and not cb.uppercut and not cb.detonateDone and cEl >= 0.37 then
+						cb.detonateDone = true
+						local blastPos = cb.pinPos
+						Core.playSFX("PARRY", 0.72, 1.0)
+						Core.playSFX("SHATTER", 0.80, 1.0, "PARRY")
+						Core.triggerHitstop(0.10, PALETTE.JUDGEMENT_GOLD)
+						Core.spawnRing(blastPos - V(0, 1.6, 0), PALETTE.JUDGEMENT_GOLD, 1.4, 12.5, 0.32)
+						Core.spawnRing(blastPos - V(0, 1.4, 0), PALETTE.PRIME_CYAN, 1.0, 9.2, 0.26)
+						Core.spawnFlash(blastPos, PALETTE.JUDGEMENT_GOLD, 1.5, 7.6, 0.26)
+						STATE.camShake = math.max(STATE.camShake, 0.82)
+						STATE.fovKick = math.max(STATE.fovKick, 11)
+
+						-- Launch extra flying rock & glowing energy debris out of the crater!
+						spawnGroundCraterDebris(STATE, c, blastPos, 4.4, 12, false)
+
+						local tChar = cb.pinTarget
+						local tHRP = tChar and Core.getTargetRoot(tChar)
+						if not tHRP then
+							tChar, tHRP = findNearestTarget(c, blastPos, COMBO_RANGE + 2, nil)
+						end
+
+						if tChar and tHRP then
+							local launchDir = tHRP.Position - hrp.Position
+							local flatDir = V(launchDir.X, 0, launchDir.Z)
+							flatDir = (flatDir.Magnitude > 0.1) and flatDir.Unit or hrp.CFrame.LookVector
+
+							-- Wall-Splat Check (~18 studs behind target)
+							local wallHit = raycastSurface(tHRP.Position, flatDir * 18, { c, tChar, getDebrisFolder() })
+							local kb = wallHit and WALLSPLAT_KNOCKBACK or FINISHER_KNOCKBACK
+
+							Core.fireDualBeams(blastPos, (blastPos + tHRP.Position) * 0.5 + V(0, 2, 0), tHRP.Position, PALETTE.PRIME_CYAN, PALETTE.JUDGEMENT_GOLD, 0.20, 0.34, true, 0.20)
+							Core.applyF3XKnockback(tChar, flatDir, kb)
+							Core.addStyleBonus(wallHit and "+WALL SPLAT!" or "+THY END IS NOW!", wallHit and 260 or 220, PALETTE.JUDGEMENT_GOLD)
+
+							if wallHit then
+								local wPos = wallHit.Position
+								task.delay(0.14, function()
+									if STATE.alive then
+										Core.playSFX("PARRY", 0.88, 0.95)
+										Core.spawnRing(wPos, PALETTE.JUDGEMENT_GOLD, 1.0, 8.5, 0.26)
+										Core.spawnFlash(wPos, PALETTE.PRIME_CYAN, 1.1, 5.5, 0.20)
+										spawnGroundCraterDebris(STATE, c, wPos, 2.8, 7, false)
+									end
+								end)
+							end
+
+							if p2 and not cb.followup and not sa.projectileActive then
 								cb.followup = true
 								launchSerpentProjectile(C(1.3, 0.8, -2.0))
 							end
-						elseif cb.step == 4 and not cb.uppercut then
-							local slamPos = (hrp.CFrame * C(0.6, -2.5, -2.2)).Position
-							Core.playSFX("PARRY", 0.72, 0.9)
-							Core.spawnRing(slamPos, PALETTE.PRIME_CYAN, 0.9, 7.5, 0.26)
-							Core.spawnFlash(slamPos, PALETTE.JUDGEMENT_GOLD, 0.9, 4.8, 0.20)
 						end
 					end
 				else
@@ -1401,7 +1584,6 @@ return function(Core)
 			if bz.active then
 				local bEl = (now - bz.startTime) * speedScale
 				if bz.overheadOnly then
-					-- Aerial Teleport Overhead Spike
 					if bEl < 0.14 then
 						if bz.phase == 0 then
 							bz.phase = 1
@@ -1446,7 +1628,6 @@ return function(Core)
 						bz.active = false
 					end
 				else
-					-- Grounded 4-Punch Teleport Blitz ("THY END IS NOW!")
 					local stepDur = 0.16
 					local totalDur = 0.82
 					if bEl < totalDur then
@@ -1480,6 +1661,7 @@ return function(Core)
 							if isLast then
 								Core.playSFX("PARRY", 0.78, 1.0)
 								Core.playSFX("SHATTER", 0.84, 0.98, "PARRY")
+								spawnGroundCraterDebris(STATE, c, (hrp.CFrame * C(0.5, 0, -2.5)).Position, 4.2, 11, true)
 							end
 
 							local hitChar, hitHRP = findNearestTarget(c, hrp.Position, COMBO_RANGE + 1.5, nil)
@@ -1493,11 +1675,10 @@ return function(Core)
 								else
 									Core.spawnRing(hitHRP.Position, PALETTE.PRIME_CYAN, 0.7, 4.6, 0.16)
 								end
-								Core.applyF3XKnockback(hitChar, hitHRP.Position - hrp.Position, isLast and FINISHER_KNOCKBACK or PUNCH_KNOCKBACK)
+								Core.applyF3XKnockback(hitChar, hitHRP.Position - hrp.Position, isLast and FINISHER_KNOCKBACK or JAB_KNOCKBACK)
 							end
 						end
 
-						-- Blitz Animations Per Beat
 						local k = easeOutBack(clamp(localEl * 1.4, 0, 1))
 						if curBeat == 1 or curBeat == 3 then
 							pelvisYaw = lerp(pelvisYaw, -32, k)
@@ -1518,7 +1699,6 @@ return function(Core)
 							lUpperPitch = lerp(lUpperPitch, 48, k)
 							lForePitch = lerp(lForePitch, 108, k)
 						else
-							-- Beat 4: Heavy Fist-Pin Ground Slam Hold!
 							local slamK = easeOutBack(clamp((bEl - 0.48) / 0.12, 0, 1))
 							torsoY -= 0.76 * slamK
 							pelvisPitch = lerp(pelvisPitch, -24, slamK)
@@ -1539,12 +1719,11 @@ return function(Core)
 			end
 
 			-------------------------------------------------------------------
-			-- MOVE 3: [E] "PREPARE THYSELF!" (2-KICK SWEEP + HOMING SERPENT)
+			-- MOVE 3: [E] "PREPARE THYSELF!"
 			-------------------------------------------------------------------
 			if sa.kickPhase then
 				local sEl = (now - sa.startTime) * speedScale
 				if sEl < 0.22 then
-					-- Kick 1: Spinning Right Roundhouse Kick
 					local k = easeOutBack(clamp(sEl / 0.14, 0, 1))
 					torsoY += 0.16 * k
 					pelvisPitch = lerp(pelvisPitch, 22, k)
@@ -1573,7 +1752,6 @@ return function(Core)
 						end
 					end
 				elseif sEl < 0.44 then
-					-- Kick 2: Counter-Rotating Left High Crescent Kick
 					local k = easeOutBack(clamp((sEl - 0.22) / 0.14, 0, 1))
 					torsoY += 0.22 * k
 					pelvisPitch = lerp(pelvisPitch, 26, k)
@@ -1603,7 +1781,6 @@ return function(Core)
 						end
 					end
 				elseif sEl < 0.68 then
-					-- Step 3: Dramatic Right Arm Whip -> Launch Undulating Golden Serpent
 					local w = clamp((sEl - 0.44) / 0.12, 0, 1)
 					local k = easeOutBack(clamp((sEl - 0.50) / 0.14, 0, 1))
 					pelvisYaw = lerp(pelvisYaw, 38 * (1 - k) - 24 * k, w)
@@ -1619,7 +1796,7 @@ return function(Core)
 
 					if not sa.launched and sEl >= 0.52 then
 						sa.launched = true
-						local tChar, tHRP = findNearestTarget(c, hrp.Position, SERPENT_RANGE, nil)
+						local _, tHRP = findNearestTarget(c, hrp.Position, SERPENT_RANGE, nil)
 						if tHRP then snapTurnTowards(hrp, tHRP.Position, inFP) end
 						launchSerpentProjectile(C(1.25, 0.85, -2.3))
 					end
@@ -1628,7 +1805,6 @@ return function(Core)
 				end
 			end
 
-			-- Update 10-Segment Undulating Homing Golden Serpent Projectile
 			local segCFs = {}
 			if sa.projectileActive then
 				local pEl = now - sa.startTime
@@ -1639,7 +1815,6 @@ return function(Core)
 					targetHRP = newHRP
 				end
 
-				-- Tightening homing curve (classic ULTRAKILL Serpent tracking!)
 				if targetHRP and targetHRP:IsA("BasePart") then
 					local desired = (targetHRP.Position - sa.pos)
 					if desired.Magnitude > 0.1 then
@@ -1656,11 +1831,9 @@ return function(Core)
 				if rightAxis.Magnitude < 0.05 then rightAxis = V(1, 0, 0) else rightAxis = rightAxis.Unit end
 				local upAxis = rightAxis:Cross(dir).Unit
 
-				-- Record spine path history
 				table.insert(sa.history, 1, sa.pos)
 				if #sa.history > 36 then table.remove(sa.history) end
 
-				-- Compute sinusoidal slithering CFrames for seg0..seg8
 				for i = 0, 8 do
 					local histIdx = math.min(#sa.history, 1 + i * 2)
 					local nextIdx = math.max(1, histIdx - 1)
@@ -1718,13 +1891,12 @@ return function(Core)
 			end
 
 			-------------------------------------------------------------------
-			-- MOVE 4: [F] "JUDGEMENT!" (CROUCH GLINT -> TELEPORT -> DROPKICK)
+			-- MOVE 4: [F] "JUDGEMENT!"
 			-------------------------------------------------------------------
 			local ja = STATE.custom.judgement
 			if ja.active then
 				local jEl = (now - ja.startTime) * speedScale
 				if jEl < 0.30 then
-					-- Coiled Predator Sprinter Crouch + Gold Parry Glint
 					local k = easeOutQuad(jEl / 0.30)
 					local tHRP = ja.targetChar and Core.getTargetRoot(ja.targetChar)
 					if tHRP then snapTurnTowards(hrp, tHRP.Position, inFP) end
@@ -1745,11 +1917,10 @@ return function(Core)
 						Core.spawnFlash(hrp.Position + V(0, 0.8, 0), PALETTE.AURA_WHITE, 0.6, 3.8, 0.14)
 					end
 				elseif jEl < 0.64 then
-					-- Instant Teleport to Target + Horizontal Twin-Leg Dropkick
 					if not ja.teleported then
 						ja.teleported = true
 						local originPos = hrp.Position
-						local tChar, tHRP = findNearestTarget(c, originPos, JUDGEMENT_RANGE, nil)
+						local _, tHRP = findNearestTarget(c, originPos, JUDGEMENT_RANGE, nil)
 						local destPos, faceDir
 						if tHRP then
 							local toTarget = (tHRP.Position - originPos)
@@ -1769,7 +1940,6 @@ return function(Core)
 					end
 
 					if jEl < 0.50 then
-						-- Horizontal Dropkick Pose (pelvisPitch = +68 leans torso horizontal back, legs straight forward!)
 						local k = easeOutBack(clamp((jEl - 0.30) / 0.10, 0, 1))
 						torsoY += 0.24 * k
 						pelvisPitch = lerp(pelvisPitch, 68, k)
@@ -1782,7 +1952,6 @@ return function(Core)
 						lUpperRoll, rUpperRoll = lerp(lUpperRoll, 42, k), lerp(rUpperRoll, -42, k)
 						lForePitch, rForePitch = lerp(lForePitch, 18, k), lerp(rForePitch, 18, k)
 					else
-						-- Stylish Backflip / Recovery Pose
 						local rec = easeOutQuad(clamp((jEl - 0.50) / 0.14, 0, 1))
 						pelvisPitch = lerp(68, 0, rec)
 						torsoPitch = lerp(14, -8, rec)
@@ -1825,7 +1994,6 @@ return function(Core)
 			-- BUILD FINAL HIERARCHICAL CFRAMES & APPLY TO BUCKETS
 			-------------------------------------------------------------------
 			local rootCenterCF = hrp.CFrame * C(0, torsoY, 0)
-			-- Pelvis sits at MINOS_PELVIS_OFFSET (-0.80) below root; orient pelvis first so hips drive the spine!
 			local pelvisBaseCF = rootCenterCF * C(0, MINOS_PELVIS_OFFSET, 0) * angles(pelvisPitch, pelvisYaw, pelvisRoll)
 			local abdomenCF = pelvisBaseCF * C(0, MINOS_ABDOMEN_OFFSET - MINOS_PELVIS_OFFSET, 0) * angles(torsoPitch * 0.45, torsoYaw * 0.45, torsoRoll * 0.45)
 			local chestCF = abdomenCF * C(0, MINOS_CHEST_OFFSET - MINOS_ABDOMEN_OFFSET, 0) * angles(torsoPitch * 0.55, torsoYaw * 0.55, torsoRoll * 0.55)
