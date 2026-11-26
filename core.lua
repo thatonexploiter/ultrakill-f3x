@@ -1793,61 +1793,46 @@ local function triggerPhysicsRamBurst(ep, targetChar, targetHRP, flatDir, power,
 
 	task.spawn(function()
 		pcall(function()
-			local c = getChar()
-			local myHRP = c and c:FindFirstChild("HumanoidRootPart")
-			local distFromMe = myHRP and (targetHRP.Position - myHRP.Position).Magnitude or 999
-			local startPos = (distFromMe <= 16 and myHRP)
-				and myHRP.Position:Lerp(targetHRP.Position, 0.45)
-				or (targetHRP.Position - flatDir * 3.2)
-			local spawnCF = C(startPos, targetHRP.Position)
+			local dur = clamp((power and power.duration) or 0.22, 0.08, 0.35)
+			local pushDist = clamp(((power and power.speed) or 40) * dur, 2.5, 22)
+			local upLift = ((power and power.up) or 0) > 15 and clamp(power.up * 0.12, 1.5, 7.0) or 0
 
-			ramPart.CFrame = spawnCF
+			local origin = targetHRP.Position
+			local startPos = origin - flatDir * 3.6 - V(0, upLift > 0 and 1.2 or 0, 0)
+			local endPos = origin + flatDir * pushDist + V(0, upLift, 0)
+
+			-- Keep Anchored = true + CanCollide = true so SyncMove is server-authoritative
+			-- and forces the target's own client to resolve the collision without rubberbanding
+			ramPart.Anchored = true
 			ramPart.CanCollide = true
-			ramPart.CustomPhysicalProperties = PhysicalProperties.new(100, 0.2, 1, 1, 1)
+			ramPart.CanTouch = true
+			ramPart.CustomPhysicalProperties = PhysicalProperties.new(100, 0.1, 1, 1, 1)
 
-			f3x(ep, "SyncMove", { { Part = ramPart, CFrame = spawnCF } })
+			local initCF = C(startPos, startPos + flatDir)
+			ramPart.CFrame = initCF
+			f3x(ep, "SyncAnchor", { { Part = ramPart, Anchored = true } })
 			f3x(ep, "SyncCollision", { { Part = ramPart, CanCollide = true } })
-			f3x(ep, "SyncAnchor", { { Part = ramPart, Anchored = false } })
+			f3x(ep, "SyncMove", { { Part = ramPart, CFrame = initCF } })
 
-			local waitStart = os.clock()
-			while ramPart.Parent and ramPart.Anchored and (os.clock() - waitStart) < 0.25 do
-				RunService.Heartbeat:Wait()
+			local steps = math.max(3, math.floor(dur / 0.045))
+			for i = 1, steps do
+				if not (STATE and STATE.alive and ramPart.Parent and targetHRP.Parent and rag.active and not rag.restoring) then
+					break
+				end
+				local alpha = easeOutQuad(i / steps)
+				local curPos = startPos:Lerp(endPos, alpha)
+				local stepCF = C(curPos, curPos + flatDir)
+				ramPart.CFrame = stepCF
+				f3x(ep, "SyncMove", { { Part = ramPart, CFrame = stepCF } })
+				task.wait(dur / steps)
 			end
-			if not (ramPart.Parent and not ramPart.Anchored and STATE and STATE.alive) then return end
-
-			local bv = Instance.new("BodyVelocity")
-			bv.MaxForce = V(1e8, 1e8, 1e8)
-			bv.P = 1e6
-			local launchVel = flatDir * (power.speed * 2.5) + V(0, math.max(power.up * 1.4, 28), 0)
-			bv.Velocity = launchVel
-			bv.Parent = ramPart
-
-			ramPart.CanCollide = true
-			ramPart.AssemblyLinearVelocity = launchVel
-			ramPart.AssemblyAngularVelocity = V(32, 24, 32)
-
-			local ramEnd = os.clock() + 0.26
-			while os.clock() < ramEnd and STATE and STATE.alive and ramPart.Parent and targetHRP.Parent and rag.active and not rag.restoring do
-				local toTarg = targetHRP.Position - ramPart.Position
-				local flatTo = V(toTarg.X, 0, toTarg.Z)
-				local steerDir = (flatTo.Magnitude > 0.35 and flatTo.Magnitude < 16) and flatTo.Unit or flatDir
-				local curVel = steerDir * (power.speed * 2.5) + V(0, math.max(power.up * 1.4, 28), 0)
-				bv.Velocity = curVel
-				ramPart.AssemblyLinearVelocity = curVel
-				ramPart.AssemblyAngularVelocity = V(32, 24, 32)
-				RunService.Heartbeat:Wait()
-			end
-
-			bv:Destroy()
-			ramPart.AssemblyLinearVelocity = V(0, 0, 0)
-			ramPart.AssemblyAngularVelocity = V(0, 0, 0)
 		end)
 
 		if ramPart and ramPart.Parent and ep and ep.Parent then
 			ramPart.Anchored = true
 			ramPart.CanCollide = false
+			ramPart.CanTouch = false
 			ramPart.CFrame = PARK_CF
-			f3x(ep, "SyncAnchor", { { Part = ramPart, Anchored = true } })
 			f3x(ep, "SyncCollision", { { Part = ramPart, CanCollide = false } })
 			f3x(ep, "SyncMove", { { Part = ramPart, CFrame = PARK_CF } })
 		end
@@ -1870,7 +1855,12 @@ local function runPhysicsRamAndSeat(targetChar, targetHRP, flatDir, power, rag)
 		if not rag.hrpDrive and not rag.noDirect and not targetHRP.Locked then
 			local origAnchor = targetHRP.Anchored
 			local okA = f3x(ep, "SyncAnchor", { { Part = targetHRP, Anchored = true } })
-			if okA and not targetHRP.Anchored then task.wait(0.035) end
+			if okA then
+				local waitStart = os.clock()
+				while not targetHRP.Anchored and (os.clock() - waitStart) < 0.18 and rag.active and not rag.restoring do
+					task.wait(0.02)
+				end
+			end
 			if okA and targetHRP.Anchored and rag.active and not rag.restoring then
 				rag.hrpDrive = "direct"
 				rag.hrpOrigAnchored = origAnchor
@@ -1886,7 +1876,8 @@ local function runPhysicsRamAndSeat(targetChar, targetHRP, flatDir, power, rag)
 		end
 
 		local seatEntry = STATE and STATE.seatPart
-		if not rag.hrpDrive and CONFIG.ENABLE_SEAT_CAPTURE and seatEntry and seatEntry.part and seatEntry.part.Parent and not STATE.seatBusy then
+		local isShortNudge = power and power.duration and power.duration <= 0.30
+		if not isShortNudge and not rag.hrpDrive and CONFIG.ENABLE_SEAT_CAPTURE and seatEntry and seatEntry.part and seatEntry.part.Parent and not STATE.seatBusy then
 			STATE.seatBusy = true
 			rag.capturedSeat = true
 			local sPart = seatEntry.part
@@ -2125,6 +2116,8 @@ end
 function Core.applyF3XKnockback(targetChar, dir, power)
 	if not (STATE and targetChar and targetChar.Parent) then return end
 	power = power or CONFIG.PARRY_KNOCKBACK_POWER
+	local kbDur = power.duration or CONFIG.RAGDOLL_DURATION
+	local isShortNudge = power.duration ~= nil and power.duration <= 0.30
 
 	local flatDir = V(dir.X, 0, dir.Z)
 	flatDir = (flatDir.Magnitude < 0.01) and V(0, 0, -1) or flatDir.Unit
@@ -2135,12 +2128,12 @@ function Core.applyF3XKnockback(targetChar, dir, power)
 
 	local existing = STATE.ragdollingTargets[targetChar]
 	if existing and existing.active then
-		existing.endTime = os.clock() + CONFIG.RAGDOLL_DURATION
+		existing.endTime = os.clock() + kbDur
 		existing.wallSlammed = false
-		existing.vel = flatDir * power.speed + V(0, math.max(power.up, 26), 0)
+		existing.vel = flatDir * power.speed + V(0, isShortNudge and power.up or math.max(power.up, 26), 0)
 		existing.flatDir = flatDir
 		existing.angVel = V(-power.spin, (math.random() - 0.5) * 7, (math.random() - 0.5) * 7)
-		existing.pos = (existing.pos or targetHRP.Position) + V(0, 0.9, 0)
+		existing.pos = (existing.pos or targetHRP.Position) + V(0, isShortNudge and 0.15 or 0.9, 0)
 		if existing.mode == "npc" and not existing.hrpDrive then
 			pcall(function()
 				targetHRP.AssemblyLinearVelocity = existing.vel
@@ -2155,7 +2148,7 @@ function Core.applyF3XKnockback(targetChar, dir, power)
 	end
 
 	local targetPlayer = Players:GetPlayerFromCharacter(targetChar)
-	if not targetPlayer and targetHum and CONFIG.ENABLE_TARGET_RAGDOLL then
+	if not targetPlayer and targetHum and CONFIG.ENABLE_TARGET_RAGDOLL and not isShortNudge then
 		startNPCRagdoll(targetChar, targetHum, targetHRP, flatDir, power)
 		return
 	end
@@ -2167,7 +2160,7 @@ function Core.applyF3XKnockback(targetChar, dir, power)
 
 	local rag = {
 		char = targetChar, hum = targetHum, hrp = targetHRP, mode = "ram", active = true, restoring = false,
-		isR15 = isR15, startTime = os.clock(), endTime = os.clock() + CONFIG.RAGDOLL_DURATION,
+		isR15 = isR15, startTime = os.clock(), endTime = os.clock() + kbDur,
 		flatDir = flatDir, pos = (torso and torso.Position) or targetHRP.Position,
 		vel = flatDir * power.speed + V(0, power.up, 0),
 		rot = (torso and torso.CFrame.Rotation) or targetHRP.CFrame.Rotation,
@@ -2182,7 +2175,7 @@ function Core.applyF3XKnockback(targetChar, dir, power)
 		runPhysicsRamAndSeat(targetChar, targetHRP, flatDir, power, rag)
 	end
 
-	if CONFIG.ENABLE_TARGET_RAGDOLL and CONFIG.ENABLE_FE_PROXY_RAGDOLL and ep and torso and not torso.Locked then
+	if not isShortNudge and CONFIG.ENABLE_TARGET_RAGDOLL and CONFIG.ENABLE_FE_PROXY_RAGDOLL and ep and torso and not torso.Locked then
 		task.spawn(function()
 			local built = buildTargetProxyRig(ep, targetChar, torso, upperTorso, isR15, rag)
 			if built then flashTargetDamage(targetChar, rag.cloneFlashSaved) else flashTargetDamage(targetChar) end
