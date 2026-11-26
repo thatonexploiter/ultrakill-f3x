@@ -48,6 +48,7 @@ local TIPS = {
 	"TIP OF THE DAY: THROW A COIN AND SHOOT IT FOR AN INSTANT RICOCHET.",
 	"TIP OF THE DAY: MANKIND IS DEAD. BLOOD IS FUEL. HELL IS FULL.",
 	"TIP OF THE DAY: USE [ REBUILD ] IF YOUR CHARACTER RESPAWNS OR DESYNCS.",
+	"TIP OF THE DAY: PREPARE THYSELF — PRESS [X] AS MINOS PRIME TO UNLEASH PHASE 2.",
 }
 
 -- ============================================================================
@@ -82,9 +83,9 @@ local CHARACTERS = {
 		id = "minos",
 		name = "MINOS PRIME",
 		subtitle = "KING OF LUST // PRIME SOUL",
-		path = nil,
-		unlocked = false,
-		desc = "[LOCKED] Awaiting module deployment in characters/minos.lua.",
+		path = "characters/minos.lua",
+		unlocked = true,
+		desc = "Translucent Prime Soul with exposed red heart, circulatory veins, hollow face void, prism crown, forearm serpents, and full P-1 moveset.",
 	},
 }
 
@@ -95,6 +96,7 @@ local LEGACY_CLEANUP_GLOBALS = {
 	"F3XV1ReanimCleanup",
 	"F3XV2ReanimCleanup",
 	"F3XR6ReanimCleanup",
+	"F3XMinosReanimCleanup",
 	"F3XMayhemIdleCleanup",
 }
 
@@ -102,6 +104,7 @@ local LEGACY_REBUILD_GLOBALS = {
 	"F3XV1ReanimRebuild",
 	"F3XV2ReanimRebuild",
 	"F3XR6ReanimRebuild",
+	"F3XMinosReanimRebuild",
 }
 
 local function getGuiParent()
@@ -498,7 +501,7 @@ local agState = {
 	whitelist = { [LocalPlayer.UserId] = true },
 	liveGuard = false,
 	autoClean = true,
-	filterModeIndex = 2, -- Smart Threats
+	filterModeIndex = 2,
 	antiFling = true,
 	antiVoid = true,
 	charShield = true,
@@ -600,7 +603,6 @@ local CRITICAL_JOINT_NAMES = {
 	["Right Hip"] = true,
 }
 
--- Forward UI hooks for Anti-Grief
 local agLogEvent
 local agUpdateTelemetry
 local agUpdateStatus
@@ -717,7 +719,6 @@ local function getRecentSpawnRate()
 	return #kept
 end
 
---// F3X SyncAPI Bridge
 local function findF3XInContainer(container)
 	if not container then return nil, nil end
 	for _, item in ipairs(container:GetChildren()) do
@@ -842,7 +843,6 @@ local function endSelfRestoring()
 	end)
 end
 
---// Snapshot & Diff Engine
 local function capturePartData(part)
 	return {
 		CFrame = part.CFrame,
@@ -997,7 +997,6 @@ local function computeMapDiff(snap)
 	return diff
 end
 
---// Threat Classification
 local function isSuspiciousPart(part, strictMode)
 	if not part or not part:IsA("BasePart") then return false end
 	if isProtectedWorldSystem(part) or scriptManagedParts[part] or isOwnRigPart(part) then return false end
@@ -1071,7 +1070,6 @@ local function isSpamEffect(inst)
 	return SPAM_EFFECT_CLASSES[inst.ClassName] or false
 end
 
---// Core Anti-Grief Actions
 local function createFallbackBaseplate(endpoint, position)
 	if not endpoint or not position then return false end
 	beginSelfRestoring()
@@ -1476,11 +1474,9 @@ trackConn(LocalPlayer.CharacterAdded:Connect(function(char)
 	end
 end))
 
---// Real-Time Workspace Listeners
 trackConn(workspace.DescendantAdded:Connect(function(desc)
 	if not terminalAlive then return end
 
-	-- Automatically mark parts spawned during ULTRAKILL rig deployment as friendly
 	if isRigDeployGraceActive() then
 		if not isProtectedWorldSystem(desc) and not isPlayerCharacterDescendant(desc) then
 			protectedRigInstances[desc] = true
@@ -1514,7 +1510,6 @@ trackConn(workspace.DescendantRemoving:Connect(function(desc)
 	end
 end))
 
---// Radar Player F3X Tracking
 local function hookPlayerTools(plr)
 	local function watchContainer(c)
 		if not c then return end
@@ -1548,7 +1543,6 @@ trackConn(Players.PlayerRemoving:Connect(function(p)
 	if agRefreshRadar and agState.windowOpen then task.defer(agRefreshRadar) end
 end))
 
---// Time-Sliced Tamper Scanner
 task.spawn(function()
 	while terminalAlive do
 		if agState.liveGuard and not agState.isBusy then
@@ -1589,13 +1583,11 @@ task.spawn(function()
 	end
 end)
 
---// Debounced Batch Worker (Spam, Character UndoRemove & Live Guard)
 task.spawn(function()
 	while terminalAlive do
 		if not agState.isBusy then
 			local ep = getF3XEndpoint(false)
 			if ep then
-				-- 1. Recover deleted self Head / Torso / Neck Motor6D via UndoRemove
 				if agState.charShield and next(pendingCharUndo) ~= nil then
 					local undoList = {}
 					for inst in pairs(pendingCharUndo) do
@@ -1614,7 +1606,6 @@ task.spawn(function()
 					end
 				end
 
-				-- 2. Spam Removal Queue
 				if agState.autoClean and next(pendingRemove) ~= nil then
 					local batch = {}
 					for inst in pairs(pendingRemove) do
@@ -1635,7 +1626,6 @@ task.spawn(function()
 					table.clear(pendingRemove)
 				end
 
-				-- 3. Live Guard Deleted/Tampered Map Parts
 				if agState.liveGuard and (next(pendingDeleted) ~= nil or next(pendingTampered) ~= nil) then
 					local snap = getActiveSnapshot()
 					if snap then
@@ -1666,7 +1656,6 @@ task.spawn(function()
 	end
 end)
 
---// Anti-Void & Anti-Fling Loop
 trackConn(RunService.Heartbeat:Connect(function()
 	if not terminalAlive then return end
 	local char = LocalPlayer.Character
@@ -1793,7 +1782,6 @@ AGBody.Position = UDim2.fromOffset(0, 28)
 AGBody.BackgroundTransparency = 1
 AGBody.Parent = AGWindow
 
--- Telemetry & Status
 local AGTelemetry = Instance.new("TextLabel")
 AGTelemetry.Size = UDim2.new(1, -16, 0, 20)
 AGTelemetry.Position = UDim2.fromOffset(8, 6)
@@ -1803,7 +1791,7 @@ AGTelemetry.Font = Enum.Font.Code
 AGTelemetry.TextSize = 11
 AGTelemetry.TextColor3 = THEME.AccentGold
 AGTelemetry.TextXAlignment = Enum.TextXAlignment.Left
-AGTelemetry.Text = " S1: EMPTY | BLOCKED: 0 | SMART"
+AGTelemetry.Text = " S1: EMPTY | BLK:0 | SMART"
 AGTelemetry.Parent = AGBody
 addStroke(AGTelemetry, THEME.BorderDim, 1)
 
@@ -1819,7 +1807,6 @@ AGStatus.TextTruncate = Enum.TextTruncate.AtEnd
 AGStatus.Text = "> STATUS: STANDBY"
 AGStatus.Parent = AGBody
 
--- Tabs
 local AGTabBar = Instance.new("Frame")
 AGTabBar.Size = UDim2.new(1, -16, 0, 26)
 AGTabBar.Position = UDim2.fromOffset(8, 48)
@@ -2490,7 +2477,6 @@ AGMinBtn.Activated:Connect(function()
 	AGMinBtn.Text = agState.windowMinimized and "+" or "-"
 end)
 
--- Poll F3X Endpoint Status
 task.spawn(function()
 	while terminalAlive do
 		local ep = getF3XEndpoint(false)
@@ -2618,21 +2604,20 @@ local function deployCharacter(charData)
 	markRigDeployGrace(4.5)
 	cleanupActiveRig()
 
-	-- 1. Fetch & load core.lua to obtain the Core table
+	-- 1. Fetch & load core.lua (graceful fallback table if core.lua is unreachable)
+	local Core = {}
 	local coreFn, coreErr = fetchAndCompile("core.lua")
-	if not coreFn then
-		logLine("Failed to load core.lua: " .. tostring(coreErr), THEME.AccentRed)
-		isBusy = false
-		return
+	if coreFn then
+		local okCore, loadedCore = pcall(coreFn)
+		if okCore and type(loadedCore) == "table" then
+			Core = loadedCore
+			logLine("core.lua loaded.", THEME.SuccessGreen)
+		else
+			logLine("core.lua invalid return; using fallback Core.", THEME.AccentGold)
+		end
+	else
+		logLine("core.lua warning: " .. tostring(coreErr) .. " (using fallback Core)", THEME.AccentGold)
 	end
-
-	local okCore, Core = pcall(coreFn)
-	if not okCore or type(Core) ~= "table" then
-		logLine("core.lua error or invalid return: " .. tostring(Core), THEME.AccentRed)
-		isBusy = false
-		return
-	end
-	logLine("core.lua loaded.", THEME.SuccessGreen)
 
 	-- 2. Fetch & load character module
 	local charFn, charErr = fetchAndCompile(charData.path)
