@@ -1,515 +1,770 @@
--- characters/v1.lua
--- ULTRAKILL V1 // SUPREME MACHINE (Módulo para Core Compartilhado)
+-- ULTRAKILL V1 MODULE (100% MODELO ORIGINAL + MARKSMAN COIN + FEEDBACKER PARRY)
+-- Carregado dinamicamente pelo loader.lua recebendo Core
 
 return function(Core)
-	local V3 = Core.V3
-	local CF = Core.CF
-	local ANG = Core.ANG
-	local ID_CF = Core.ID_CF
-	local mirrorCF = Core.mirrorCF
-	local lerpNum = Core.lerpNum
-	local lerpCF = Core.lerpCF
+	local C, V = Core.C, Core.V
+	local ID_CF, PARK_CF = Core.ID_CF, Core.PARK_CF
+	local clamp, lerp, easeOutQuad, easeOutBack = Core.clamp, Core.lerp, Core.easeOutQuad, Core.easeOutBack
+	local angles, mirrorRelCF = Core.angles, Core.mirrorRelCF
 
-	local COLORS = {
+	local PALETTE = {
 		BLUE_ARMOR = Color3.fromRGB(42, 82, 168),
 		LIGHT_BLUE_ARMOR = Color3.fromRGB(68, 114, 212),
-		DEEP_BLUE_ARMOR = Color3.fromRGB(28, 52, 112),
 		DARK_METAL = Color3.fromRGB(32, 35, 43),
 		GUN_STEEL = Color3.fromRGB(76, 84, 98),
 		SILVER_TRIM = Color3.fromRGB(178, 188, 202),
 		BLACK_TRIM = Color3.fromRGB(15, 17, 21),
 		YELLOW_NEON = Color3.fromRGB(255, 208, 30),
-		YELLOW_CORE = Color3.fromRGB(255, 240, 140),
 		MARKSMAN_GREEN = Color3.fromRGB(75, 255, 130),
 		COIN_GOLD = Color3.fromRGB(255, 215, 45),
 		BEAM_CYAN = Color3.fromRGB(115, 235, 255),
-		BEAM_CORE = Color3.fromRGB(255, 255, 255),
 		PARRY_FLASH = Color3.fromRGB(255, 245, 175),
 		BLOOD_RED = Color3.fromRGB(185, 26, 32),
 	}
 
-	local V1_DEF = {
-		id = "v1",
-		config = {
-			RENDER_NAME = "F3X_V1_Reanim",
-			SCALE = 1.0,
-			SOLE_DEPTH = 3.66,
-			HUD_TITLE = "MARKSMAN // FEEDBACKER",
-			PRIMARY_KEY_LABEL = "[E] COIN",
-			SECONDARY_KEY_LABEL = "[F] PARRY",
-			TERTIARY_KEY_LABEL = "[X] 1P ARMS",
-			PARRY_COOLDOWN = 0.42,
-			PARRY_RANGE = 11.5,
-			COIN_COOLDOWN = 0.78,
-			COIN_RANGE = 85,
-			PARRY_KNOCKBACK_POWER = { speed = 68, up = 32, spin = 12.0 },
-			COIN_KNOCKBACK_POWER = { speed = 50, up = 25, spin = 9.0 },
-			COIN_PUNCH_KNOCKBACK_POWER = { speed = 96, up = 46, spin = 16.0 },
-			COLORS = COLORS,
-		},
-	}
+	local V1_CHEST_OFFSET = 0.56
+	local V1_ABDOMEN_OFFSET = -0.22
+	local V1_PELVIS_OFFSET = -0.80
+	local V1_HIP_Y = -0.14
+	local V1_THIGH_LEN = 1.18
+	local V1_SHIN_LEN = 1.16
+	local V1_SOLE_DEPTH_FROM_ANKLE = 0.38
+	local V1_SOLE_DEPTH = math.abs(V1_PELVIS_OFFSET) + math.abs(V1_HIP_Y) + V1_THIGH_LEN + V1_SHIN_LEN + V1_SOLE_DEPTH_FROM_ANKLE -- 3.66
+	local V1_UPPER_ARM_LEN = 1.04
+	local V1_FOREARM_LEN = 1.00
+	local GUN_MOUNT_REL = ID_CF
+	local GUN_MUZZLE_LOCAL = C(0, -1.60, -0.27)
 
-	-- Estado exclusivo do V1 (Moeda + Animações de braço + Mira)
-	local v1State = {
-		coinActive = false,
-		coinPos = V3(),
-		coinVel = V3(),
-		coinSpin = 0,
-		coinExpiresAt = 0,
-		coinCooldownEnd = 0,
-		parryCooldownEnd = 0,
-		punchAnimEnd = 0,
-		shootAnimEnd = 0,
-		wingBoost = 0,
-		lastWalkPhase = 0,
-	}
-
-	local BASE_FAN = { 48, 18, -14, -46 }
+	local COIN_COOLDOWN = 0.78
+	local COIN_RANGE = 85
+	local PARRY_COOLDOWN = 0.42
+	local PARRY_RANGE = 11.5
+	local PARRY_KNOCKBACK_POWER = { speed = 68, up = 32, spin = 12.0 }
+	local COIN_KNOCKBACK_POWER = { speed = 50, up = 25, spin = 9.0 }
+	local COIN_PUNCH_KNOCKBACK_POWER = { speed = 96, up = 46, spin = 16.0 }
 
 	-------------------------------------------------------------------
-	-- CONSTRUÇÃO DE PEÇAS DO MODELO V1
+	-- BLUEPRINTS EXATOS DO V1 ORIGINAL
 	-------------------------------------------------------------------
-	function V1_DEF.buildModel(ctx)
-		local specs = {}
-		local function add(id, size, color, mat, shape, kind, tr)
-			table.insert(specs, {
-				id = id,
-				size = size,
-				color = color,
-				mat = mat or Enum.Material.SmoothPlastic,
-				shape = shape,
-				kind = kind or "Normal",
-				transparency = tr or 0,
-				canCollide = false,
-			})
-		end
-
-		-- CABEÇA (Estilo câmera + sunshade + lente circular amarela + heatsink traseiro)
-		add("head_housing", V3(1.06, 0.92, 1.24), COLORS.BLUE_ARMOR, Enum.Material.Metal)
-		add("head_brow", V3(1.16, 0.16, 1.48), COLORS.LIGHT_BLUE_ARMOR, Enum.Material.Metal)
-		add("head_cheek_l", V3(0.18, 0.68, 1.18), COLORS.DEEP_BLUE_ARMOR, Enum.Material.Metal)
-		add("head_cheek_r", V3(0.18, 0.68, 1.18), COLORS.DEEP_BLUE_ARMOR, Enum.Material.Metal)
-		add("head_visor", V3(0.84, 0.64, 0.10), COLORS.BLACK_TRIM, Enum.Material.SmoothPlastic)
-		add("head_bezel", V3(0.12, 0.56, 0.56), COLORS.DARK_METAL, Enum.Material.Metal, Enum.MeshType.Cylinder)
-		add("head_lens", V3(0.14, 0.44, 0.44), COLORS.YELLOW_NEON, Enum.Material.Neon, Enum.MeshType.Cylinder)
-		add("head_lens_core", V3(0.15, 0.22, 0.22), COLORS.YELLOW_CORE, Enum.Material.Neon, Enum.MeshType.Cylinder)
-		add("head_rear_sink", V3(0.76, 0.62, 0.24), COLORS.DARK_METAL, Enum.Material.Metal)
-		add("neck_col", V3(0.36, 0.42, 0.36), COLORS.DARK_METAL, Enum.Material.Metal, Enum.MeshType.Cylinder)
-		add("neck_piston_l", V3(0.12, 0.42, 0.12), COLORS.SILVER_TRIM, Enum.Material.Metal)
-		add("neck_piston_r", V3(0.12, 0.42, 0.12), COLORS.SILVER_TRIM, Enum.Material.Metal)
-
-		-- TORSO / PEITO / CINTURA HIDRÁULICA / QUADRIL
-		add("chest_core", V3(1.52, 0.96, 0.92), COLORS.BLUE_ARMOR, Enum.Material.Metal)
-		add("chest_pec_l", V3(0.72, 0.68, 0.34), COLORS.LIGHT_BLUE_ARMOR, Enum.Material.Metal, nil, "Wedge")
-		add("chest_pec_r", V3(0.72, 0.68, 0.34), COLORS.LIGHT_BLUE_ARMOR, Enum.Material.Metal, nil, "Wedge")
-		add("chest_slit", V3(0.24, 0.54, 0.10), COLORS.YELLOW_NEON, Enum.Material.Neon)
-		add("chest_vent_l", V3(0.42, 0.14, 0.12), COLORS.YELLOW_NEON, Enum.Material.Neon)
-		add("chest_vent_r", V3(0.42, 0.14, 0.12), COLORS.YELLOW_NEON, Enum.Material.Neon)
-		add("collar_l", V3(0.38, 0.28, 0.78), COLORS.DEEP_BLUE_ARMOR, Enum.Material.Metal)
-		add("collar_r", V3(0.38, 0.28, 0.78), COLORS.DEEP_BLUE_ARMOR, Enum.Material.Metal)
-
-		add("abdomen_spine", V3(0.74, 0.76, 0.64), COLORS.DARK_METAL, Enum.Material.Metal)
-		add("abdomen_tube_l", V3(0.14, 0.72, 0.14), COLORS.BLOOD_RED, Enum.Material.Metal, Enum.MeshType.Cylinder)
-		add("abdomen_tube_r", V3(0.14, 0.72, 0.14), COLORS.BLOOD_RED, Enum.Material.Metal, Enum.MeshType.Cylinder)
-		add("pelvis_core", V3(1.18, 0.46, 0.78), COLORS.BLUE_ARMOR, Enum.Material.Metal)
-		add("pelvis_plate", V3(0.56, 0.44, 0.86), COLORS.DEEP_BLUE_ARMOR, Enum.Material.Metal)
-
-		-- MOCHILA EM V (Suporte das asas)
-		add("pack_spine", V3(0.84, 1.05, 0.46), COLORS.DARK_METAL, Enum.Material.Metal)
-		add("pack_fin_l", V3(0.34, 0.86, 0.48), COLORS.BLUE_ARMOR, Enum.Material.Metal)
-		add("pack_fin_r", V3(0.34, 0.86, 0.48), COLORS.BLUE_ARMOR, Enum.Material.Metal)
-		add("pack_core", V3(0.34, 0.48, 0.18), COLORS.YELLOW_NEON, Enum.Material.Neon)
-
-		-- 8 ASAS (4 por lado, cada asa = 6 partes + 1 ponta wedge = 7 partes)
-		for side = 1, 2 do
-			local sTag = (side == 1) and "L" or "R"
-			for w = 1, 4 do
-				local prefix = "wing_" .. sTag .. w .. "_"
-				add(prefix .. "hinge", V3(0.24, 0.26, 0.24), COLORS.DARK_METAL, Enum.Material.Metal)
-				add(prefix .. "cowl",  V3(0.46, 0.34, 0.18), COLORS.BLUE_ARMOR, Enum.Material.Metal)
-				add(prefix .. "rail",  V3(0.95, 0.16, 0.14), COLORS.GUN_STEEL, Enum.Material.Metal)
-				add(prefix .. "glow1", V3(0.88, 0.24, 0.08), COLORS.YELLOW_NEON, Enum.Material.Neon)
-				add(prefix .. "glow2", V3(0.92, 0.22, 0.08), COLORS.YELLOW_NEON, Enum.Material.Neon)
-				add(prefix .. "glow3", V3(0.86, 0.18, 0.08), COLORS.YELLOW_CORE, Enum.Material.Neon)
-				add(prefix .. "tip",   V3(0.08, 0.22, 0.64), COLORS.YELLOW_NEON, Enum.Material.Neon, nil, "Wedge")
-			end
-		end
-
-		-- BRAÇOS (Esquerdo = Feedbacker azul/prata | Direito = Arma Marksman)
-		for _, side in ipairs({ "L", "R" }) do
-			add("sh_guard_" .. side, V3(0.56, 0.48, 0.64), COLORS.LIGHT_BLUE_ARMOR, Enum.Material.Metal)
-			add("uarm_plate_" .. side, V3(0.46, 0.86, 0.46), COLORS.BLUE_ARMOR, Enum.Material.Metal)
-			add("elbow_" .. side, V3(0.38, 0.32, 0.38), COLORS.DARK_METAL, Enum.Material.Metal, Enum.MeshType.Sphere)
-			add("farm_plate_" .. side, V3(0.42, 0.84, 0.42), (side == "L") and COLORS.LIGHT_BLUE_ARMOR or COLORS.BLUE_ARMOR, Enum.Material.Metal)
-			add("hand_" .. side, V3(0.34, 0.32, 0.36), (side == "L") and COLORS.SILVER_TRIM or COLORS.DARK_METAL, Enum.Material.Metal)
-		end
-		-- Detalhe Feedbacker no antebraço esquerdo
-		add("feedbacker_knuckle", V3(0.38, 0.18, 0.40), COLORS.SILVER_TRIM, Enum.Material.Metal)
-		add("feedbacker_trim", V3(0.14, 0.66, 0.46), COLORS.YELLOW_NEON, Enum.Material.Neon)
-
-		-- REVÓLVER MARKSMAN (Mão Direita)
-		add("gun_grip",   V3(0.18, 0.44, 0.24), COLORS.DARK_METAL, Enum.Material.Metal)
-		add("gun_frame",  V3(0.22, 0.30, 0.72), COLORS.GUN_STEEL, Enum.Material.Metal)
-		add("gun_barrel", V3(0.18, 0.20, 0.88), COLORS.BLACK_TRIM, Enum.Material.Metal)
-		add("gun_drum",   V3(0.26, 0.26, 0.30), COLORS.SILVER_TRIM, Enum.Material.Metal, Enum.MeshType.Cylinder)
-		add("gun_screen", V3(0.16, 0.14, 0.28), COLORS.MARKSMAN_GREEN, Enum.Material.Neon)
-
-		-- PERNAS (Coxa + Joelheira + Canela afilada + Pé + Esporão de calcanhar)
-		for _, side in ipairs({ "L", "R" }) do
-			add("thigh_" .. side, V3(0.56, 1.06, 0.58), COLORS.BLUE_ARMOR, Enum.Material.Metal)
-			add("thigh_trim_" .. side, V3(0.60, 0.34, 0.30), COLORS.DARK_METAL, Enum.Material.Metal)
-			add("knee_" .. side, V3(0.46, 0.44, 0.48), COLORS.SILVER_TRIM, Enum.Material.Metal)
-			add("shin_" .. side, V3(0.44, 1.08, 0.48), COLORS.DEEP_BLUE_ARMOR, Enum.Material.Metal)
-			add("foot_" .. side, V3(0.48, 0.28, 0.86), COLORS.DARK_METAL, Enum.Material.Metal)
-			add("sole_" .. side, V3(0.50, 0.10, 0.88), COLORS.BLACK_TRIM, Enum.Material.SmoothPlastic)
-			add("heel_spur_" .. side, V3(0.26, 0.24, 0.34), COLORS.SILVER_TRIM, Enum.Material.Metal)
-		end
-
-		return specs
-	end
-
-	-------------------------------------------------------------------
-	-- HABILIDADES DO V1: MOEDA MARKSMAN [E] + FEEDBACKER PARRY [F]
-	-------------------------------------------------------------------
-	local function fireMarksmanRicochet(ctx, coinOrigin)
-		local targets = ctx.Core.getTargetsInRadius(coinOrigin, V1_DEF.config.COIN_RANGE)
-		local hitTarget = targets[1]
-
-		local muzzleWorld = ctx.parts.gun_barrel and (ctx.parts.gun_barrel.CFrame * CF(0, 0, -0.45)).Position
-			or (ctx.root.Position + V3(0.9, 1.3, 0))
-
-		ctx.Core.spawnFXBeam(muzzleWorld, coinOrigin, COLORS.COIN_GOLD, COLORS.BEAM_CORE, 0.28, 0.18, 1)
-		ctx.Core.spawnFXExplosion(coinOrigin, COLORS.COIN_GOLD, 3.6, 0.18)
-
-		if hitTarget then
-			ctx.Core.spawnFXBeam(coinOrigin, hitTarget.hrp.Position, COLORS.BEAM_CYAN, COLORS.BEAM_CORE, 0.38, 0.24, 2)
-			ctx.Core.spawnFXExplosion(hitTarget.hrp.Position, COLORS.BEAM_CYAN, 5.5, 0.22)
-			ctx.Core.addStyleBonus("RICOSHOT", 200, COLORS.BEAM_CYAN)
-			ctx.Core.playSFX("SHATTER", 1.2, 0.85)
-			ctx.Core.triggerHitstop(0.075, 0.22, 0.3)
-			local dir = (hitTarget.hrp.Position - coinOrigin)
-			ctx.Core.applyF3XKnockback(hitTarget.char, dir, V1_DEF.config.COIN_KNOCKBACK_POWER, hitTarget.hrp.Position, COLORS.BEAM_CYAN)
-		else
-			local cam = workspace.CurrentCamera
-			local look = cam and cam.CFrame.LookVector or ctx.root.CFrame.LookVector
-			ctx.Core.spawnFXBeam(coinOrigin, coinOrigin + look * 45, COLORS.BEAM_CYAN, COLORS.BEAM_CORE, 0.24, 0.18, 2)
-		end
-	end
-
-	function V1_DEF.onPrimaryAction(ctx)
-		local now = os.clock()
-		if now < v1State.coinCooldownEnd or not ctx.root then return end
-
-		if v1State.coinActive and now < v1State.coinExpiresAt then
-			-- Segundo aperto de E (ou tiro automático): atira na moeda ativa!
-			v1State.coinActive = false
-			ctx.Core.clearFXPart("fx_coin")
-			v1State.shootAnimEnd = now + 0.22
-			ctx.Core.playSFX("SHOT", 1.35, 0.85)
-			fireMarksmanRicochet(ctx, v1State.coinPos)
-			return
-		end
-
-		v1State.coinCooldownEnd = now + V1_DEF.config.COIN_COOLDOWN
-		v1State.coinActive = true
-		v1State.coinExpiresAt = now + 1.55
-
-		local cam = workspace.CurrentCamera
-		local aimDir = cam and cam.CFrame.LookVector or ctx.root.CFrame.LookVector
-		local flatVel = V3(ctx.root.AssemblyLinearVelocity.X, 0, ctx.root.AssemblyLinearVelocity.Z)
-		v1State.coinPos = ctx.root.Position + V3(0, 2.0, 0) + aimDir * 2.2
-		v1State.coinVel = aimDir * 28 + flatVel * 0.65 + V3(0, 28, 0)
-		ctx.Core.playSFX("COIN_FLIP", 1.5, 0.8)
-		ctx.Core.addStyleBonus("COIN TOSS", 25, COLORS.COIN_GOLD)
-
-		-- Disparo automático rápido se o jogador não socar antes
-		task.delay(0.38, function()
-			if v1State.coinActive and ctx.state and ctx.state.running then
-				v1State.coinActive = false
-				ctx.Core.clearFXPart("fx_coin")
-				v1State.shootAnimEnd = os.clock() + 0.22
-				ctx.Core.playSFX("SHOT", 1.35, 0.85)
-				fireMarksmanRicochet(ctx, v1State.coinPos)
-			end
-		end)
-	end
-
-	function V1_DEF.onSecondaryAction(ctx)
-		local now = os.clock()
-		if now < v1State.parryCooldownEnd or not ctx.root then return end
-		v1State.parryCooldownEnd = now + V1_DEF.config.PARRY_COOLDOWN
-		v1State.punchAnimEnd = now + 0.26
-
-		local cam = workspace.CurrentCamera
-		local aimDir = cam and cam.CFrame.LookVector or ctx.root.CFrame.LookVector
-		local punchOrigin = ctx.root.Position + aimDir * 2.5
-
-		-- Coin Punch ("FISTFUL OF DOLLAR") se a moeda estiver no ar perto
-		if v1State.coinActive and (v1State.coinPos - punchOrigin).Magnitude <= 14 then
-			v1State.coinActive = false
-			ctx.Core.clearFXPart("fx_coin")
-			local targets = ctx.Core.getTargetsInRadius(v1State.coinPos, V1_DEF.config.COIN_RANGE)
-			ctx.Core.playSFX("PARRY", 1.1, 0.95)
-			ctx.Core.triggerHitstop(0.11, 0.3, 0.38)
-			ctx.Core.spawnFXExplosion(v1State.coinPos, COLORS.COIN_GOLD, 6.5, 0.24)
-			ctx.Core.addStyleBonus("FISTFUL OF DOLLAR", 320, COLORS.COIN_GOLD)
-
-			if targets[1] then
-				local t = targets[1]
-				ctx.Core.spawnFXBeam(v1State.coinPos, t.hrp.Position, COLORS.COIN_GOLD, COLORS.BEAM_CORE, 0.48, 0.26, 1)
-				ctx.Core.applyF3XKnockback(t.char, t.hrp.Position - v1State.coinPos, V1_DEF.config.COIN_PUNCH_KNOCKBACK_POWER, t.hrp.Position, COLORS.COIN_GOLD)
-			end
-			return
-		end
-
-		-- Feedbacker Parry / Soco normal
-		ctx.Core.playSFX("PUNCH")
-		local hits = ctx.Core.getTargetsInRadius(punchOrigin, V1_DEF.config.PARRY_RANGE)
-		if #hits > 0 then
-			ctx.Core.playSFX("PARRY")
-			ctx.Core.triggerHitstop(0.095, 0.26, 0.34)
-			ctx.Core.spawnFXExplosion(hits[1].hrp.Position, COLORS.PARRY_FLASH, 5.2, 0.20)
-			ctx.Core.addStyleBonus("PARRY", 250, COLORS.PARRY_FLASH)
-			for _, t in ipairs(hits) do
-				ctx.Core.applyF3XKnockback(t.char, aimDir, V1_DEF.config.PARRY_KNOCKBACK_POWER, t.hrp.Position, COLORS.PARRY_FLASH)
-			end
-		end
-	end
-
-	function V1_DEF.onDash()
-		v1State.wingBoost = 1.0
-	end
-
-	-------------------------------------------------------------------
-	-- POSE PROCEDURAL DO RIG V1
-	-------------------------------------------------------------------
-	function V1_DEF.poseRig(ctx, dt, motion)
-		local now = motion.now
-		local root = ctx.root
-		local hum = ctx.hum
-		if not root or not hum then return nil end
-
-		-- Física da moeda ativa
-		if v1State.coinActive then
-			if now >= v1State.coinExpiresAt then
-				v1State.coinActive = false
-				ctx.Core.clearFXPart("fx_coin")
-			else
-				v1State.coinVel = v1State.coinVel - V3(0, 54 * dt, 0)
-				v1State.coinPos = v1State.coinPos + v1State.coinVel * dt
-				v1State.coinSpin += dt * 16
-				ctx.Core.setFXPartState("fx_coin", CF(v1State.coinPos) * ANG(v1State.coinSpin, v1State.coinSpin * 0.5, math.rad(90)))
-			end
-		end
-
-		v1State.wingBoost = math.max(0, v1State.wingBoost - dt * 3.5)
-
-		local vel = root.AssemblyLinearVelocity
-		local horiz = V3(vel.X, 0, vel.Z)
-		local speed = horiz.Magnitude
-		local grounded = (hum.FloorMaterial ~= Enum.Material.Air)
-
-		local rootCF = root.CFrame
-		local localVel = rootCF:VectorToObjectSpace(horiz)
-		local leanZ = math.clamp(-localVel.Z / 36, -0.35, 0.35)
-		local leanX = math.clamp(localVel.X / 40, -0.25, 0.25)
-
-		local pelvisOffset = -0.80
-		local baseRootCF = CF(rootCF.Position) * (rootCF - rootCF.Position)
-		if motion.isSliding then
-			baseRootCF = baseRootCF * CF(0, -1.35, 0.3) * ANG(math.rad(55), 0, 0)
-		elseif motion.isSlamming then
-			baseRootCF = baseRootCF * ANG(math.rad(-25), 0, 0)
-		else
-			baseRootCF = baseRootCF * ANG(leanZ * 0.35, 0, -leanX * 0.35)
-		end
-
-		-- Balanço de caminhada/corrida e Idle visível (respiração mecânica + asas vivas)
-		local breath = math.sin(now * 2.6) * 0.055
-		local walkFreq = motion.isSprinting and 13 or 9
-		if grounded and speed > 1.5 and not motion.isSliding then
-			v1State.lastWalkPhase += dt * walkFreq * math.clamp(speed / 16, 0.5, 2.0)
-		end
-		local wp = v1State.lastWalkPhase
-		local moveAlpha = grounded and math.clamp(speed / 14, 0, 1) or 0
-
-		local pelvisCF = baseRootCF * CF(0, pelvisOffset + breath * 0.5, 0)
-		local abdomenCF = pelvisCF * CF(0, 0.58, 0) * ANG(math.rad(3) + leanZ * 0.18, 0, 0)
-		local chestCF = abdomenCF * CF(0, 0.78 + breath * 0.4, 0) * ANG(math.rad(4) + leanZ * 0.2, math.sin(wp) * 0.08 * moveAlpha, 0)
-
-		-- Head Aim Tracking
-		local cam = workspace.CurrentCamera
-		local headRot = ID_CF
-		if cam then
-			local relLook = chestCF:VectorToObjectSpace(cam.CFrame.LookVector)
-			local yaw = math.clamp(math.atan2(-relLook.X, -relLook.Z), -0.65, 0.65)
-			local pitch = math.clamp(math.asin(math.clamp(relLook.Y, -0.8, 0.8)), -0.45, 0.45)
-			headRot = ANG(pitch, yaw, 0)
-		end
-		local headCF = chestCF * CF(0, 0.92, -0.04) * headRot
-
-		local T = {}
-		local hideSelfArms = motion.isFirstPerson and motion.fpHideArms
-		local hideHead = motion.isFirstPerson
-
-		local function setP(id, cf)
-			T[id] = cf
-		end
-
-		-- Cabeça (oculta apenas se estiver em 1ª pessoa)
-		local hBase = hideHead and CF(0, 25000, 0) or headCF
-		setP("head_housing", hBase)
-		setP("head_brow", hBase * CF(0, 0.44, -0.14))
-		setP("head_cheek_l", hBase * CF(-0.56, -0.06, -0.04))
-		setP("head_cheek_r", hBase * CF(0.56, -0.06, -0.04))
-		setP("head_visor", hBase * CF(0, -0.02, -0.62))
-		setP("head_bezel", hBase * CF(0, 0.02, -0.65) * ANG(0, math.rad(90), 0))
-		setP("head_lens", hBase * CF(0, 0.02, -0.68) * ANG(0, math.rad(90), 0))
-		setP("head_lens_core", hBase * CF(0, 0.02, -0.70) * ANG(0, math.rad(90), 0))
-		setP("head_rear_sink", hBase * CF(0, 0.02, 0.64))
-		setP("neck_col", (hideHead and CF(0, 25000, 0) or chestCF * CF(0, 0.56, 0)))
-		setP("neck_piston_l", (hideHead and CF(0, 25000, 0) or chestCF * CF(-0.22, 0.56, 0.08) * ANG(0, 0, math.rad(-10))))
-		setP("neck_piston_r", (hideHead and CF(0, 25000, 0) or chestCF * CF(0.22, 0.56, 0.08) * ANG(0, 0, math.rad(10))))
-
-		-- Torso
-		setP("chest_core", chestCF)
-		setP("chest_pec_l", chestCF * CF(-0.38, 0.08, -0.44) * ANG(math.rad(165), math.rad(10), 0))
-		setP("chest_pec_r", chestCF * CF(0.38, 0.08, -0.44) * ANG(math.rad(165), math.rad(-10), 0))
-		setP("chest_slit", chestCF * CF(0, 0.05, -0.58))
-		setP("chest_vent_l", chestCF * CF(-0.36, -0.22, -0.50) * ANG(0, 0, math.rad(-8)))
-		setP("chest_vent_r", chestCF * CF(0.36, -0.22, -0.50) * ANG(0, 0, math.rad(8)))
-		setP("collar_l", chestCF * CF(-0.56, 0.44, 0) * ANG(0, 0, math.rad(-14)))
-		setP("collar_r", chestCF * CF(0.56, 0.44, 0) * ANG(0, 0, math.rad(14)))
-
-		setP("abdomen_spine", abdomenCF)
-		setP("abdomen_tube_l", abdomenCF * CF(-0.42, 0, -0.05))
-		setP("abdomen_tube_r", abdomenCF * CF(0.42, 0, -0.05))
-		setP("pelvis_core", pelvisCF)
-		setP("pelvis_plate", pelvisCF * CF(0, -0.04, -0.06))
-
-		-- Mochila + 8 Asas (espelho matricial perfeito)
-		local packCF = chestCF * CF(0, 0.05, 0.56)
-		setP("pack_spine", packCF)
-		setP("pack_fin_l", packCF * CF(-0.42, 0.14, 0.10) * ANG(0, math.rad(18), math.rad(14)))
-		setP("pack_fin_r", packCF * CF(0.42, 0.14, 0.10) * ANG(0, math.rad(-18), math.rad(-14)))
-		setP("pack_core", packCF * CF(0, 0.10, 0.22))
-
-		local wingFlare = (motion.isDashing and -18 or 0) + (motion.isSprinting and 10 or 0) + v1State.wingBoost * 16
-		local sweepBack = motion.isDashing and 38 or (motion.isSprinting and 26 or 18)
-
-		for side = 1, 2 do
-			local isLeft = (side == 1)
-			local sTag = isLeft and "L" or "R"
-			for w = 1, 4 do
-				local prefix = "wing_" .. sTag .. w .. "_"
-				local bob = math.sin(now * 3.1 + w * 0.7 + side) * 2.5
-				local fanAngle = BASE_FAN[w] + (w <= 2 and wingFlare or -wingFlare * 0.4) + bob
-				local relRoot = CF(0.46, 0.24 - (w - 1) * 0.14, 0.14)
-					* ANG(0, math.rad(sweepBack), math.rad(fanAngle))
-				if isLeft then
-					relRoot = mirrorCF(relRoot)
-				end
-				local wBase = packCF * relRoot
-
-				local function wPart(rel)
-					return wBase * (isLeft and mirrorCF(rel) or rel)
-				end
-
-				setP(prefix .. "hinge", wPart(CF(0.10, 0, 0)))
-				setP(prefix .. "cowl",  wPart(CF(0.42, 0, 0.02)))
-				setP(prefix .. "rail",  wPart(CF(0.86, 0.02, 0.05)))
-				setP(prefix .. "glow1", wPart(CF(0.82, 0, 0)))
-				setP(prefix .. "glow2", wPart(CF(1.66, 0, 0)))
-				setP(prefix .. "glow3", wPart(CF(2.44, 0, 0)))
-				setP(prefix .. "tip",   wPart(CF(3.16, 0, 0) * ANG(0, math.rad(-90), math.rad(90))))
-			end
-		end
-
-		-- Braços (Feedbacker Esquerdo + Marksman Direito)
-		local punchProg = (now < v1State.punchAnimEnd) and (1 - (v1State.punchAnimEnd - now) / 0.26) or 0
-		local shootRecoil = (now < v1State.shootAnimEnd) and ((v1State.shootAnimEnd - now) / 0.22) or 0
-
-		local armSwingL = math.sin(wp) * 0.55 * moveAlpha
-		local armSwingR = -math.sin(wp) * 0.35 * moveAlpha
-
-		local lShoulder = chestCF * CF(-1.02, 0.30, 0)
-		if punchProg > 0 then
-			local thrust = math.sin(punchProg * math.pi)
-			lShoulder = lShoulder * ANG(math.rad(88 * thrust), math.rad(-18 * thrust), math.rad(12))
-		else
-			lShoulder = lShoulder * ANG(armSwingL, 0, math.rad(10 + breath * 15))
-		end
-
-		local rShoulder = chestCF * CF(1.02, 0.30, 0)
-		if cam then
-			local aimLocal = chestCF:VectorToObjectSpace(cam.CFrame.LookVector)
-			local pitch = math.clamp(math.asin(math.clamp(aimLocal.Y, -0.85, 0.85)), -0.8, 0.8)
-			rShoulder = rShoulder * ANG(math.rad(76) + pitch + shootRecoil * 0.38, math.rad(-6), math.rad(-6))
-		else
-			rShoulder = rShoulder * ANG(math.rad(68) + armSwingR, 0, math.rad(-8))
-		end
-
-		local function placeArm(side, shCF, elbowBend)
-			if hideSelfArms then shCF = CF(0, 25000, 0) end
-			local uArm = shCF * CF(0, -0.46, 0)
-			local elb = shCF * CF(0, -0.94, 0)
-			local fArm = elb * ANG(elbowBend, 0, 0) * CF(0, -0.44, 0)
-			local hand = fArm * CF(0, -0.52, 0)
-			setP("sh_guard_" .. side, shCF * CF((side == "L") and -0.08 or 0.08, 0.08, 0))
-			setP("uarm_plate_" .. side, uArm)
-			setP("elbow_" .. side, elb)
-			setP("farm_plate_" .. side, fArm)
-			setP("hand_" .. side, hand)
-			return fArm, hand
-		end
-
-		local lFArm, lHand = placeArm("L", lShoulder, (punchProg > 0) and math.rad(14) or math.rad(28))
-		setP("feedbacker_knuckle", lHand * CF(0, -0.06, -0.04))
-		setP("feedbacker_trim", lFArm * CF(-0.20, 0, 0))
-
-		local _, rHand = placeArm("R", rShoulder, math.rad(18))
-		local gunRoot = rHand * CF(0, -0.24, -0.18) * ANG(math.rad(-90), 0, 0)
-		if hideSelfArms then gunRoot = CF(0, 25000, 0) end
-		setP("gun_grip",   gunRoot * CF(0, -0.14, 0.14) * ANG(math.rad(18), 0, 0))
-		setP("gun_frame",  gunRoot * CF(0, 0.10, -0.10))
-		setP("gun_barrel", gunRoot * CF(0, 0.14, -0.78))
-		setP("gun_drum",   gunRoot * CF(0, 0.12, -0.06) * ANG(0, math.rad(90), 0))
-		setP("gun_screen", gunRoot * CF(0, 0.27, 0.08))
-
-		-- Pernas (Joelhos dobrando corretamente para trás com -rx)
-		local legSwingL = math.sin(wp) * 0.72 * moveAlpha
-		local legSwingR = -math.sin(wp) * 0.72 * moveAlpha
-		local airRise = not grounded and math.clamp(vel.Y / 32, -1, 1) or 0
-
-		local function placeLeg(side, xOff, hipPitch)
-			local hip = pelvisCF * CF(xOff, -0.14, 0)
-			local kneeAngle = grounded and (-math.max(0, math.sin(wp + ((side == "L") and 0.4 or 3.54)) * 0.85 * moveAlpha)) or math.rad(-28 - airRise * 18)
-			if motion.isSliding then
-				hipPitch = math.rad(42)
-				kneeAngle = math.rad(-25)
-			end
-			local thighCF = hip * ANG(hipPitch, 0, 0) * CF(0, -0.58, 0)
-			local kneeCF = hip * ANG(hipPitch, 0, 0) * CF(0, -1.16, 0)
-			local shinCF = kneeCF * ANG(kneeAngle, 0, 0) * CF(0, -0.58, 0)
-			local footCF = shinCF * CF(0, -0.62, -0.18) * ANG(-hipPitch - kneeAngle, 0, 0)
-
-			setP("thigh_" .. side, thighCF)
-			setP("thigh_trim_" .. side, thighCF * CF(0, 0.08, -0.22))
-			setP("knee_" .. side, kneeCF * CF(0, 0, -0.12))
-			setP("shin_" .. side, shinCF)
-			setP("foot_" .. side, footCF)
-			setP("sole_" .. side, footCF * CF(0, -0.16, 0))
-			setP("heel_spur_" .. side, footCF * CF(0, 0.06, 0.50))
-		end
-
-		placeLeg("L", -0.36, legSwingL + (not grounded and math.rad(24) or 0))
-		placeLeg("R",  0.36, legSwingR + (not grounded and math.rad(14) or 0))
-
-		return T, {
-			title = v1State.coinActive and "MARKSMAN // COIN AIRBORNE" or "MARKSMAN // FEEDBACKER",
-			hint = "[E] COIN | [F] PARRY | [Q] DASH | [C] SLIDE/SLAM",
+	local function getV1HeadSpecs()
+		return {
+			{ partType = "Cylinder", size = V(0.36, 0.28, 0.28), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, -0.36, 0.06) * angles(0, 0, 90) },
+			{ partType = "Cylinder", size = V(0.36, 0.12, 0.12), color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, relCF = C(-0.14, -0.34, -0.02) * angles(10, 0, 82) },
+			{ partType = "Cylinder", size = V(0.36, 0.12, 0.12), color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, relCF = C(0.14, -0.34, -0.02) * angles(10, 0, 98) },
+			{ partType = "Normal",   size = V(0.76, 0.62, 1.14), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, 0.04, 0.05) * angles(-6, 0, 0) },
+			{ partType = "Wedge",    size = V(0.84, 0.20, 1.30), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, 0.43, -0.02) * angles(-5, 0, 0) },
+			{ partType = "Normal",   size = V(0.86, 0.10, 0.42), color = PALETTE.LIGHT_BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, 0.36, -0.58) * angles(-12, 0, 0) },
+			{ partType = "Wedge",    size = V(0.14, 0.14, 0.96), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, 0.54, 0.12) * angles(-4, 0, 0) },
+			{ partType = "Wedge",    size = V(0.14, 0.54, 0.98), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(-0.42, 0.00, 0.02) * angles(-6, -10, 6) },
+			{ partType = "Wedge",    size = V(0.14, 0.54, 0.98), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0.42, 0.00, 0.02) * angles(-6, 10, -6) },
+			{ partType = "Cylinder", size = V(0.92, 0.18, 0.18), color = PALETTE.GUN_STEEL, mat = Enum.Material.Metal, relCF = C(0, 0.04, 0.08) },
+			{ partType = "Normal",   size = V(0.60, 0.48, 0.26), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, 0.06, 0.66) * angles(-6, 0, 0) },
+			{ partType = "Normal",   size = V(0.42, 0.22, 0.12), color = PALETTE.GUN_STEEL,  mat = Enum.Material.Metal, relCF = C(0, 0.16, 0.78) * angles(-6, 0, 0) },
+			{ partType = "Wedge",    size = V(0.60, 0.20, 0.74), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, -0.26, -0.14) * angles(174, 0, 0) },
+			{ partType = "Normal",   size = V(0.66, 0.48, 0.14), color = PALETTE.BLACK_TRIM, mat = Enum.Material.SmoothPlastic, relCF = C(0, 0.03, -0.50) * angles(-6, 0, 0) },
+			{ partType = "Cylinder", size = V(0.12, 0.44, 0.44), color = PALETTE.GUN_STEEL,   mat = Enum.Material.Metal, relCF = C(0, 0.03, -0.55) * angles(-6, 0, 0) * angles(0, 90, 0) },
+			{ partType = "Cylinder", size = V(0.14, 0.34, 0.34), color = PALETTE.YELLOW_NEON, mat = Enum.Material.Neon,  relCF = C(0, 0.03, -0.57) * angles(-6, 0, 0) * angles(0, 90, 0), light = true },
 		}
 	end
 
-	Core.start(V1_DEF)
+	local function getV1ChestSpecs()
+		return {
+			{ partType = "Normal",   size = V(1.74, 0.78, 0.74), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, 0.12, 0.02) },
+			{ partType = "Wedge",    size = V(0.76, 0.62, 0.28), color = PALETTE.LIGHT_BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(-0.46, 0.16, -0.44) * angles(0, 12, 180) },
+			{ partType = "Wedge",    size = V(0.76, 0.62, 0.28), color = PALETTE.LIGHT_BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0.46, 0.16, -0.44) * angles(0, -12, 180) },
+			{ partType = "Normal",   size = V(0.32, 0.76, 0.22), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, 0.10, -0.36) },
+			{ partType = "Normal",   size = V(0.10, 0.40, 0.08), color = PALETTE.YELLOW_NEON, mat = Enum.Material.Neon, relCF = C(0, 0.16, -0.45), light = true },
+			{ partType = "Normal",   size = V(0.40, 0.18, 0.12), color = PALETTE.BLACK_TRIM, mat = Enum.Material.SmoothPlastic, relCF = C(-0.52, -0.06, -0.42) * angles(-10, 12, 0) },
+			{ partType = "Normal",   size = V(0.40, 0.18, 0.12), color = PALETTE.BLACK_TRIM, mat = Enum.Material.SmoothPlastic, relCF = C(0.52, -0.06, -0.42) * angles(-10, -12, 0) },
+			{ partType = "Normal",   size = V(0.30, 0.06, 0.08), color = PALETTE.YELLOW_NEON, mat = Enum.Material.Neon, relCF = C(-0.52, -0.06, -0.46) * angles(-10, 12, 0) },
+			{ partType = "Normal",   size = V(0.30, 0.06, 0.08), color = PALETTE.YELLOW_NEON, mat = Enum.Material.Neon, relCF = C(0.52, -0.06, -0.46) * angles(-10, -12, 0) },
+			{ partType = "Wedge",    size = V(0.30, 0.34, 0.78), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(-0.62, 0.62, 0.02) * angles(0, 0, -18) },
+			{ partType = "Wedge",    size = V(0.30, 0.34, 0.78), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0.62, 0.62, 0.02) * angles(0, 0, 18) },
+			{ partType = "Normal",   size = V(0.84, 0.18, 0.68), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, 0.56, 0.04) },
+			{ partType = "Normal",   size = V(1.16, 0.32, 0.64), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, -0.34, 0.02) },
+			{ partType = "Cylinder", size = V(1.94, 0.34, 0.34), color = PALETTE.BLACK_TRIM, mat = Enum.Material.Metal, relCF = C(0, 0.24, 0.02) },
+		}
+	end
+
+	local function getV1AbdomenSpecs()
+		return {
+			{ partType = "Cylinder", size = V(0.84, 0.36, 0.36), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, 0.0, 0.04) * angles(0, 0, 90) },
+			{ partType = "Normal",   size = V(0.68, 0.74, 0.46), color = PALETTE.BLACK_TRIM, mat = Enum.Material.SmoothPlastic, relCF = C(0, 0.0, 0.0) },
+			{ partType = "Normal",   size = V(0.76, 0.16, 0.50), color = PALETTE.GUN_STEEL, mat = Enum.Material.Metal, relCF = C(0, 0.14, 0.0) },
+			{ partType = "Normal",   size = V(0.72, 0.16, 0.48), color = PALETTE.GUN_STEEL, mat = Enum.Material.Metal, relCF = C(0, -0.14, 0.0) },
+			{ partType = "Cylinder", size = V(0.78, 0.14, 0.14), color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, relCF = C(-0.28, 0.0, -0.18) * angles(0, 0, 84) },
+			{ partType = "Cylinder", size = V(0.78, 0.14, 0.14), color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, relCF = C(0.28, 0.0, -0.18) * angles(0, 0, 96) },
+			{ partType = "Normal",   size = V(0.08, 0.56, 0.08), color = PALETTE.BLOOD_RED, mat = Enum.Material.SmoothPlastic, relCF = C(-0.40, 0.0, -0.12) * angles(0, 0, 10) },
+			{ partType = "Normal",   size = V(0.08, 0.56, 0.08), color = PALETTE.BLOOD_RED, mat = Enum.Material.SmoothPlastic, relCF = C(0.40, 0.0, -0.12) * angles(0, 0, -10) },
+		}
+	end
+
+	local function getV1PelvisSpecs()
+		return {
+			{ partType = "Normal",   size = V(1.12, 0.34, 0.58), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.02, 0) },
+			{ partType = "Wedge",    size = V(0.58, 0.36, 0.36), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.06, -0.26) * angles(180, 0, 0) },
+			{ partType = "Normal",   size = V(0.16, 0.38, 0.46), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(-0.62, -0.06, 0.02) * angles(0, 0, 12) },
+			{ partType = "Normal",   size = V(0.16, 0.38, 0.46), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0.62, -0.06, 0.02) * angles(0, 0, -12) },
+			{ partType = "Cylinder", size = V(1.10, 0.28, 0.28), color = PALETTE.GUN_STEEL, mat = Enum.Material.Metal, relCF = C(0, -0.14, 0) },
+		}
+	end
+
+	local function getV1CoreSpecs()
+		return {
+			{ partType = "Normal",   size = V(0.88, 0.88, 0.38), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, 0.14, 0.54) },
+			{ partType = "Wedge",    size = V(0.76, 0.28, 0.38), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, 0.64, 0.52) * angles(16, 0, 0) },
+			{ partType = "Normal",   size = V(0.52, 0.94, 0.26), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, 0.12, 0.68) },
+			{ partType = "Normal",   size = V(0.22, 0.86, 0.24), color = PALETTE.GUN_STEEL, mat = Enum.Material.Metal, relCF = C(-0.36, 0.18, 0.72) * angles(0, 0, 16) },
+			{ partType = "Normal",   size = V(0.22, 0.86, 0.24), color = PALETTE.GUN_STEEL, mat = Enum.Material.Metal, relCF = C(0.36, 0.18, 0.72) * angles(0, 0, -16) },
+			{ partType = "Normal",   size = V(0.16, 0.60, 0.12), color = PALETTE.YELLOW_NEON, mat = Enum.Material.Neon, relCF = C(0, 0.14, 0.79), light = true },
+			{ partType = "Normal",   size = V(0.44, 0.22, 0.30), color = PALETTE.BLACK_TRIM, mat = Enum.Material.Metal, relCF = C(0, -0.34, 0.62) * angles(-18, 0, 0) },
+		}
+	end
+
+	local function getV1SingleWingParts()
+		return {
+			{ partType = "Cylinder", size = V(0.18, 0.22, 0.22), color = PALETTE.GUN_STEEL,  mat = Enum.Material.Metal, relCF = C(0.05, 0, 0) * angles(0, 90, 0) },
+			{ partType = "Normal",   size = V(0.72, 0.12, 0.14), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0.42, 0, 0) },
+			{ partType = "Wedge",    size = V(0.18, 0.26, 0.90), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0.92, 0.08, 0) * angles(0, -90, 0) },
+			{ partType = "Normal",   size = V(0.96, 0.11, 0.12), color = PALETTE.BLACK_TRIM, mat = Enum.Material.SmoothPlastic, relCF = C(1.22, -0.04, 0) },
+			{ partType = "Normal",   size = V(0.42, 0.22, 0.14), color = PALETTE.GUN_STEEL,  mat = Enum.Material.Metal, relCF = C(1.68, 0.01, 0) },
+			{ partType = "Normal",   size = V(2.55, 0.28, 0.06), color = PALETTE.YELLOW_NEON, mat = Enum.Material.Neon, relCF = C(2.96, 0.01, 0) },
+			{ partType = "Wedge",    size = V(0.06, 0.28, 1.30), color = PALETTE.YELLOW_NEON, mat = Enum.Material.Neon, relCF = C(4.885, 0.01, 0) * angles(0, -90, 0) },
+		}
+	end
+
+	local function getV1UpperArmSpecs(isFeedbacker)
+		local accent = isFeedbacker and PALETTE.SILVER_TRIM or PALETTE.DARK_METAL
+		return {
+			{ partType = "Ball",     size = V(0.42, 0.42, 0.42), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, 0, 0) },
+			{ partType = "Wedge",    size = V(0.56, 0.34, 0.56), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.10, 0) * angles(0, 0, isFeedbacker and -16 or 16) },
+			{ partType = "Normal",   size = V(0.42, 0.72, 0.44), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.50, 0) },
+			{ partType = "Normal",   size = V(0.18, 0.54, 0.22), color = accent,             mat = Enum.Material.Metal, relCF = C(0, -0.54, -0.18) },
+			{ partType = "Cylinder", size = V(0.34, 0.26, 0.26), color = PALETTE.GUN_STEEL,  mat = Enum.Material.Metal, relCF = C(0, -V1_UPPER_ARM_LEN, 0) },
+		}
+	end
+
+	local function getV1ForearmSpecs(isFeedbacker)
+		if isFeedbacker then
+			return {
+				{ partType = "Ball",     size = V(0.30, 0.30, 0.30), color = PALETTE.DARK_METAL,  mat = Enum.Material.Metal, relCF = C(0, 0, 0) },
+				{ partType = "Normal",   size = V(0.46, 0.80, 0.48), color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, relCF = C(0, -0.48, 0) },
+				{ partType = "Normal",   size = V(0.52, 0.34, 0.54), color = PALETTE.BLUE_ARMOR,  mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.74, -0.02) },
+				{ partType = "Normal",   size = V(0.12, 0.46, 0.12), color = PALETTE.YELLOW_NEON, mat = Enum.Material.Neon, relCF = C(-0.24, -0.50, -0.14) },
+				{ partType = "Cylinder", size = V(0.52, 0.14, 0.14), color = PALETTE.GUN_STEEL,   mat = Enum.Material.Metal, relCF = C(0, -0.46, 0.24) * angles(0, 0, 90) },
+			}
+		end
+		return {
+			{ partType = "Ball",     size = V(0.28, 0.28, 0.28), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, 0, 0) },
+			{ partType = "Normal",   size = V(0.40, 0.78, 0.42), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.48, 0) },
+			{ partType = "Normal",   size = V(0.44, 0.20, 0.46), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, -0.84, 0) },
+			{ partType = "Cylinder", size = V(0.46, 0.14, 0.14), color = PALETTE.GUN_STEEL,  mat = Enum.Material.Metal, relCF = C(0, -0.46, 0.20) * angles(0, 0, 90) },
+		}
+	end
+
+	local function getV1HandSpecs(isFist)
+		if isFist then
+			return {
+				{ partType = "Normal", size = V(0.40, 0.34, 0.44), color = PALETTE.DARK_METAL,  mat = Enum.Material.Metal, relCF = C(0, -0.18, 0) },
+				{ partType = "Normal", size = V(0.46, 0.22, 0.50), color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, relCF = C(0, -0.34, -0.02) },
+				{ partType = "Normal", size = V(0.44, 0.14, 0.44), color = PALETTE.BLUE_ARMOR,  mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.46, -0.02) },
+				{ partType = "Normal", size = V(0.16, 0.16, 0.14), color = PALETTE.YELLOW_NEON, mat = Enum.Material.Neon, relCF = C(0, -0.30, -0.24), light = true },
+			}
+		end
+		return {
+			{ partType = "Normal", size = V(0.36, 0.34, 0.40), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, -0.18, 0) },
+			{ partType = "Normal", size = V(0.40, 0.20, 0.44), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.34, -0.02) },
+			{ partType = "Normal", size = V(0.16, 0.26, 0.18), color = PALETTE.BLACK_TRIM, mat = Enum.Material.SmoothPlastic, relCF = C(0.12, -0.42, -0.06) },
+		}
+	end
+
+	local function getV1ThighSpecs()
+		return {
+			{ partType = "Ball",     size = V(0.42, 0.42, 0.42), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, 0, 0) },
+			{ partType = "Normal",   size = V(0.58, 0.94, 0.58), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.56, 0) },
+			{ partType = "Wedge",    size = V(0.52, 0.38, 0.22), color = PALETTE.LIGHT_BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.42, -0.32) * angles(8, 0, 0) },
+			{ partType = "Normal",   size = V(0.16, 0.60, 0.10), color = PALETTE.BLACK_TRIM, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.60, -0.28) },
+			{ partType = "Cylinder", size = V(0.38, 0.30, 0.30), color = PALETTE.GUN_STEEL,  mat = Enum.Material.Metal, relCF = C(0, -V1_THIGH_LEN, 0) },
+		}
+	end
+
+	local function getV1ShinSpecs()
+		return {
+			{ partType = "Ball",     size = V(0.32, 0.32, 0.32), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, 0, 0) },
+			{ partType = "Normal",   size = V(0.48, 0.96, 0.48), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.56, 0) },
+			{ partType = "Wedge",    size = V(0.40, 0.48, 0.28), color = PALETTE.LIGHT_BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.14, -0.26) * angles(-14, 0, 0) },
+			{ partType = "Normal",   size = V(0.14, 0.70, 0.10), color = PALETTE.BLACK_TRIM, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.62, -0.23) },
+			{ partType = "Cylinder", size = V(0.58, 0.14, 0.14), color = PALETTE.GUN_STEEL,  mat = Enum.Material.Metal, relCF = C(0, -0.54, 0.26) * angles(0, 0, 90) },
+			{ partType = "Cylinder", size = V(0.28, 0.24, 0.24), color = PALETTE.GUN_STEEL,  mat = Enum.Material.Metal, relCF = C(0, -V1_SHIN_LEN, 0) },
+		}
+	end
+
+	local function getV1FootSpecs()
+		return {
+			{ partType = "Normal", size = V(0.38, 0.18, 0.48), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, -0.10, -0.06) },
+			{ partType = "Normal", size = V(0.44, 0.16, 0.70), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.25, -0.18) },
+			{ partType = "Wedge",  size = V(0.40, 0.18, 0.36), color = PALETTE.BLUE_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.24, -0.58) },
+			{ partType = "Normal", size = V(0.38, 0.08, 0.72), color = PALETTE.BLACK_TRIM, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.34, -0.26) },
+			{ partType = "Normal", size = V(0.30, 0.20, 0.28), color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, -0.23, 0.22) * angles(20, 0, 0) },
+		}
+	end
+
+	local function getV1GunSpecs()
+		return {
+			{ partType = "Normal",   size = V(0.18, 0.24, 0.48), color = PALETTE.BLACK_TRIM,     mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.24, 0.04) * angles(-16, 0, 0) },
+			{ partType = "Normal",   size = V(0.21, 0.27, 0.10), color = PALETTE.SILVER_TRIM,    mat = Enum.Material.Metal,         relCF = C(0, -0.16, 0.28) * angles(-16, 0, 0) },
+			{ partType = "Normal",   size = V(0.07, 0.26, 0.06), color = PALETTE.BLACK_TRIM,     mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.44, 0.06) },
+			{ partType = "Normal",   size = V(0.07, 0.06, 0.18), color = PALETTE.BLACK_TRIM,     mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.56, -0.02) },
+			{ partType = "Normal",   size = V(0.04, 0.05, 0.12), color = PALETTE.GUN_STEEL,      mat = Enum.Material.Metal,         relCF = C(0, -0.39, -0.03) * angles(-20, 0, 0) },
+			{ partType = "Normal",   size = V(0.22, 0.58, 0.20), color = PALETTE.DARK_METAL,     mat = Enum.Material.Metal,         relCF = C(0, -0.46, -0.14) },
+			{ partType = "Normal",   size = V(0.18, 0.14, 0.18), color = PALETTE.SILVER_TRIM,    mat = Enum.Material.Metal,         relCF = C(0, -0.16, -0.22) * angles(22, 0, 0) },
+			{ partType = "Cylinder", size = V(0.32, 0.30, 0.30), color = PALETTE.GUN_STEEL,      mat = Enum.Material.Metal,         relCF = C(0, -0.54, -0.28) * angles(0, 0, 90) },
+			{ partType = "Normal",   size = V(0.18, 0.42, 0.07), color = PALETTE.DARK_METAL,     mat = Enum.Material.Metal,         relCF = C(0, -0.54, -0.44) },
+			{ partType = "Normal",   size = V(0.22, 0.86, 0.24), color = PALETTE.GUN_STEEL,      mat = Enum.Material.Metal,         relCF = C(0, -1.12, -0.29) },
+			{ partType = "Normal",   size = V(0.16, 0.80, 0.09), color = PALETTE.BLUE_ARMOR,     mat = Enum.Material.SmoothPlastic, relCF = C(0, -1.10, -0.43) },
+			{ partType = "Normal",   size = V(0.16, 0.08, 0.08), color = PALETTE.DARK_METAL,     mat = Enum.Material.Metal,         relCF = C(0, -0.28, -0.46) },
+			{ partType = "Normal",   size = V(0.05, 0.09, 0.09), color = PALETTE.MARKSMAN_GREEN, mat = Enum.Material.Neon,          relCF = C(0, -1.48, -0.48), gunNeon = true },
+			{ partType = "Normal",   size = V(0.15, 0.68, 0.12), color = PALETTE.BLACK_TRIM,     mat = Enum.Material.SmoothPlastic, relCF = C(0, -1.06, -0.14) },
+			{ partType = "Cylinder", size = V(0.14, 0.16, 0.16), color = PALETTE.BLACK_TRIM,     mat = Enum.Material.Metal,         relCF = C(0, -1.58, -0.29) * angles(0, 0, 90) },
+			{ partType = "Normal",   size = V(0.245, 0.66, 0.055), color = PALETTE.MARKSMAN_GREEN, mat = Enum.Material.Neon,        relCF = C(0, -1.12, -0.29), gunNeon = true },
+			{ partType = "Normal",   size = V(0.14, 0.04, 0.11),   color = PALETTE.MARKSMAN_GREEN, mat = Enum.Material.Neon,        relCF = C(0, -0.17, -0.34), gunNeon = true },
+		}
+	end
+
+	-------------------------------------------------------------------
+	-- TARGETING DO V1 (MELEE PARRY + COIN RICOCHET)
+	-------------------------------------------------------------------
+	local function findNearestMeleeTarget(c, hrp)
+		local bestChar, bestHRP, bestDist = nil, nil, PARRY_RANGE
+		local myPos, look = hrp.Position, hrp.CFrame.LookVector
+		for _, model in ipairs(Core.getActiveTargetHumanoids(c)) do
+			local tHRP = Core.getTargetRoot(model.Parent)
+			if tHRP and tHRP:IsA("BasePart") then
+				local diff = tHRP.Position - myPos
+				local d = diff.Magnitude
+				if d > 0.1 and d < bestDist and (diff.Unit:Dot(look) > -0.25 or d < 5.0) then
+					bestDist, bestChar, bestHRP = d, model.Parent, tHRP
+				end
+			end
+		end
+		return bestChar, bestHRP
+	end
+
+	local function findNearestCoinTarget(c, originPos, fallbackAimPos)
+		local bestPos, bestChar, bestDist = nil, nil, COIN_RANGE
+		for _, model in ipairs(Core.getActiveTargetHumanoids(c)) do
+			local tHead = model.Parent:FindFirstChild("Head") or Core.getTargetRoot(model.Parent)
+			if tHead and tHead:IsA("BasePart") then
+				local d = (tHead.Position - originPos).Magnitude
+				if d > 2 and d < bestDist then
+					bestDist, bestPos, bestChar = d, tHead.Position, model.Parent
+				end
+			end
+		end
+		return bestPos or fallbackAimPos, bestChar
+	end
+
+	local function fireRicochetBeams(STATE, originPos, coinPos, targetPos, isCoinPunch)
+		local beam2Color = isCoinPunch and PALETTE.COIN_GOLD or PALETTE.BEAM_CYAN
+		local w1 = isCoinPunch and 0.10 or 0.24
+		local w2 = isCoinPunch and 0.52 or 0.38
+		STATE.camShake = math.max(STATE.camShake, isCoinPunch and 0.65 or 0.35)
+		STATE.fovKick = math.max(STATE.fovKick, isCoinPunch and 8 or 5)
+		Core.fireDualBeams(originPos, coinPos, targetPos, PALETTE.YELLOW_NEON, beam2Color, w1, w2, isCoinPunch, 0.28)
+		Core.spawnImpactFlash(targetPos, beam2Color, 1.1, isCoinPunch and 6.0 or 4.5, 0.26)
+	end
+
+	-------------------------------------------------------------------
+	-- MÓDULO EXPORTADO PARA O CORE
+	-------------------------------------------------------------------
+	Core.start({
+		id = "v1",
+		name = "V1",
+		config = {
+			RENDER_NAME = "F3X_V1_Reanim",
+			HUD_RENDER_NAME = "F3X_V1_3DHUD",
+			SCALE = 1.0,
+			SOLE_DEPTH = V1_SOLE_DEPTH,
+			HUD_UNIT_HEADER = "V1 // BLOOD FUEL SYSTEM",
+			HUD_WEAPON_TITLE = "MARKSMAN REVOLVER",
+			HUD_WEAPON_COLOR = PALETTE.MARKSMAN_GREEN,
+			HUD_KEY_HINT = "[Q] DASH  [C] SLAM/SLIDE  [E] COIN  [F] PARRY",
+			HUD_PIP_COLOR = PALETTE.COIN_GOLD,
+			MOBILE_PRIMARY_LABEL = "COIN",
+			MOBILE_PRIMARY_COLOR = PALETTE.COIN_GOLD,
+			MOBILE_SECONDARY_LABEL = "PARRY",
+			MOBILE_SECONDARY_COLOR = PALETTE.PARRY_FLASH,
+		},
+
+		initState = function()
+			local STATE = Core.getState()
+			STATE.custom.coinAttack = {
+				active = false, lastUsed = 0, startTime = 0, shotFired = false, punched = false, beamsHidden = false,
+				tossPos = V(0, 0, 0), tossVel = V(0, 0, 0), coinCF = PARK_CF,
+			}
+			STATE.custom.parryAttack = { active = false, lastUsed = 0, startTime = 0, hitTriggered = false }
+		end,
+
+		buildModel = function(_, _, _, _, torsoInitCF)
+			local specs = {}
+			local chestCF = torsoInitCF * C(0, V1_CHEST_OFFSET, 0)
+			local abdomenCF = torsoInitCF * C(0, V1_ABDOMEN_OFFSET, 0)
+			local pelvisCF = torsoInitCF * C(0, V1_PELVIS_OFFSET, 0)
+			local headInitCF = chestCF * C(0, 1.06, -0.06)
+
+			for _, hp in ipairs(getV1HeadSpecs()) do
+				specs[#specs + 1] = {
+					kind = "v1head", partType = hp.partType, relCF = hp.relCF, origCF = headInitCF * hp.relCF,
+					origSize = hp.size, origColor = hp.color, origMaterial = hp.mat, origTrans = 0, origReflectance = 0, light = hp.light,
+				}
+			end
+
+			local function addV1(kind, list, parentCF, key)
+				for _, sp in ipairs(list) do
+					specs[#specs + 1] = {
+						kind = kind, key = key, partType = sp.partType, relCF = sp.relCF, origCF = parentCF * sp.relCF,
+						origSize = sp.size, origColor = sp.color, origMaterial = sp.mat, origTrans = 0, origReflectance = 0,
+						light = sp.light, gunNeon = sp.gunNeon,
+					}
+				end
+			end
+
+			addV1("v1chest", getV1ChestSpecs(), chestCF, "chest")
+			addV1("v1chest", getV1AbdomenSpecs(), abdomenCF, "abdomen")
+			addV1("v1chest", getV1PelvisSpecs(), pelvisCF, "pelvis")
+
+			local shoulderL = chestCF * C(-1.06, 0.24, 0)
+			local shoulderR = chestCF * C(1.06, 0.24, 0)
+			local elbowL, elbowR = shoulderL * C(0, -V1_UPPER_ARM_LEN, 0), shoulderR * C(0, -V1_UPPER_ARM_LEN, 0)
+			local wristL, wristR = elbowL * C(0, -V1_FOREARM_LEN, 0), elbowR * C(0, -V1_FOREARM_LEN, 0)
+
+			addV1("v1upperArm", getV1UpperArmSpecs(true), shoulderL, "lUpperArm")
+			addV1("v1upperArm", getV1UpperArmSpecs(false), shoulderR, "rUpperArm")
+			addV1("v1forearm", getV1ForearmSpecs(true), elbowL, "lForearm")
+			addV1("v1forearm", getV1ForearmSpecs(false), elbowR, "rForearm")
+			addV1("v1hand", getV1HandSpecs(true), wristL, "lHand")
+			addV1("v1hand", getV1HandSpecs(false), wristR, "rHand")
+
+			local hipL = pelvisCF * C(-0.46, V1_HIP_Y, 0)
+			local hipR = pelvisCF * C(0.46, V1_HIP_Y, 0)
+			local kneeL, kneeR = hipL * C(0, -V1_THIGH_LEN, 0), hipR * C(0, -V1_THIGH_LEN, 0)
+			local ankleL, ankleR = kneeL * C(0, -V1_SHIN_LEN, 0), kneeR * C(0, -V1_SHIN_LEN, 0)
+
+			addV1("v1thigh", getV1ThighSpecs(), hipL, "lThigh")
+			addV1("v1thigh", getV1ThighSpecs(), hipR, "rThigh")
+			addV1("v1shin", getV1ShinSpecs(), kneeL, "lShin")
+			addV1("v1shin", getV1ShinSpecs(), kneeR, "rShin")
+			addV1("v1foot", getV1FootSpecs(), ankleL, "lFoot")
+			addV1("v1foot", getV1FootSpecs(), ankleR, "rFoot")
+
+			for _, cp in ipairs(getV1CoreSpecs()) do
+				specs[#specs + 1] = {
+					kind = "v1core", partType = cp.partType, relCF = cp.relCF, origCF = chestCF * cp.relCF,
+					origSize = cp.size, origColor = cp.color, origMaterial = cp.mat, origTrans = 0, origReflectance = 0, light = cp.light,
+				}
+			end
+
+			local singleWing = getV1SingleWingParts()
+			for _, side in ipairs({ -1, 1 }) do
+				for wingIdx = 1, 4 do
+					for _, wp in ipairs(singleWing) do
+						local relCF = (side == -1) and mirrorRelCF(wp.relCF) or wp.relCF
+						specs[#specs + 1] = {
+							kind = "v1wing", side = side, wingIdx = wingIdx, partType = wp.partType, relCF = relCF,
+							origCF = chestCF * relCF, origSize = wp.size, origColor = wp.color, origMaterial = wp.mat, origTrans = 0, origReflectance = 0,
+						}
+					end
+				end
+			end
+
+			for _, gp in ipairs(getV1GunSpecs()) do
+				specs[#specs + 1] = {
+					kind = "v1gun", partType = gp.partType, relCF = gp.relCF, origCF = wristR * GUN_MOUNT_REL * gp.relCF,
+					origSize = gp.size, origColor = gp.color, origMaterial = gp.mat, origTrans = 0, origReflectance = 0, gunNeon = gp.gunNeon,
+				}
+			end
+
+			return specs
+		end,
+
+		onPrimary = function()
+			local STATE = Core.getState()
+			if not (STATE and STATE.alive) or STATE.isSettingUp then return end
+			local ca = STATE.custom.coinAttack
+			local now = os.clock()
+			if ca.active or (now - ca.lastUsed) < COIN_COOLDOWN then return end
+			local c = Core.getChar()
+			local hrp = c and c:FindFirstChild("HumanoidRootPart")
+			if not hrp then return end
+
+			ca.active, ca.lastUsed, ca.startTime = true, now, now
+			ca.shotFired, ca.punched, ca.beamsHidden = false, false, false
+
+			local cam = workspace.CurrentCamera
+			local headReal = c:FindFirstChild("Head")
+			local inFP = cam and headReal and ((cam.CFrame.Position - headReal.Position).Magnitude < Core.getConfig().FIRST_PERSON_HIDE_DIST) or false
+			local aimCF = (inFP and cam) and cam.CFrame or hrp.CFrame
+
+			local flatLook = V(aimCF.LookVector.X, 0, aimCF.LookVector.Z)
+			flatLook = (flatLook.Magnitude < 0.01) and hrp.CFrame.LookVector or flatLook.Unit
+			local hrpVel = hrp.AssemblyLinearVelocity
+			ca.tossPos = (aimCF * C(-0.55, 0.55, -1.8)).Position
+			ca.tossVel = V(hrpVel.X * 0.72, math.max(hrpVel.Y * 0.35, 0), hrpVel.Z * 0.72) + flatLook * 15 + V(0, 14, 0)
+			ca.coinCF = C(ca.tossPos)
+
+			Core.playSFX("COIN_FLIP", 1.05, 1.0, "PARRY")
+			if STATE.coinPart and STATE.coinPart.part then
+				Core.syncPartMaterial({ { Part = STATE.coinPart.part, Transparency = 0 } })
+			end
+		end,
+
+		onSecondary = function()
+			local STATE = Core.getState()
+			if not (STATE and STATE.alive) or STATE.isSettingUp then return end
+			local pa = STATE.custom.parryAttack
+			local now = os.clock()
+			if pa.active or (now - pa.lastUsed) < PARRY_COOLDOWN then return end
+			pa.active, pa.lastUsed, pa.startTime, pa.hitTriggered = true, now, now, false
+		end,
+
+		stepCharacter = function(_, c, hrp, hum, _, ctx)
+			local STATE = Core.getState()
+			local CONFIG = Core.getConfig()
+			local now = ctx.now
+			local inFP = ctx.inFP
+			local cam = ctx.cam
+			local isAir = ctx.isAir
+			local sinW, cosW = ctx.sinW, ctx.cosW
+
+			local t = STATE.time
+			local idleWeight = clamp(1 - STATE.walkBlend, 0, 1) * (1 - STATE.airBlend)
+			local realSoleDepth = (STATE.rigType == "R15") and (hum.HipHeight + hrp.Size.Y * 0.5) or 3.0
+			local groundOffsetY = V1_SOLE_DEPTH - realSoleDepth
+
+			local camPitch, camYawLocal = 0, 0
+			if CONFIG.ENABLE_HEAD_AIM_TRACKING and cam then
+				local camLocalLook = hrp.CFrame:VectorToObjectSpace(cam.CFrame.LookVector)
+				camPitch = clamp(math.asin(clamp(camLocalLook.Y, -0.85, 0.85)) * 180 / math.pi, -45, 55)
+				camYawLocal = clamp(math.atan2(-camLocalLook.X, -camLocalLook.Z) * 180 / math.pi, -35, 35)
+			end
+
+			local torsoY = groundOffsetY + math.sin(t * 2.6) * 0.045 * idleWeight + math.abs(sinW) * 0.14 * STATE.walkBlend * (1 + STATE.sprintBlend * 0.4) - STATE.landRecover * 0.28
+			local idleYaw = 12 * idleWeight
+			local walkTwist = cosW * (6 + STATE.sprintBlend * 7) * STATE.walkBlend
+			local torsoPitch = -STATE.localFwd * (8 + STATE.sprintBlend * 11) + (STATE.landRecover * -12) + STATE.airBlend * clamp(-STATE.vertVel * 0.35, -14, 16)
+			local torsoRoll = -STATE.localStrafe * 9 - STATE.turnRate * 1.4
+
+			if STATE.slide.active and not isAir then
+				torsoY -= 1.35
+				torsoPitch = 38
+			end
+
+			local dashTilt, dashRoll = 0, 0
+			if STATE.dash.active then
+				local dEl = now - STATE.dash.startTime
+				if dEl < CONFIG.DASH_DURATION then
+					local envD = math.sin((dEl / CONFIG.DASH_DURATION) * math.pi)
+					dashTilt, dashRoll = STATE.dash.localDir.Z * 26 * envD, -STATE.dash.localDir.X * 26 * envD
+					torsoY -= 0.20 * envD
+				end
+			end
+
+			local headRX = math.sin(t * 2.6 - 0.6) * 2.5 * idleWeight + camPitch * 0.65 - torsoPitch * 0.5
+			local headRY = math.sin(t * 0.9) * 6.0 * idleWeight + camYawLocal * 0.65 - idleYaw * 0.5
+			local headRZ = -torsoRoll * 0.4
+
+			local lHipRX = (12 * idleWeight) + (sinW * (34 + STATE.sprintBlend * 22) * STATE.walkBlend * clamp(STATE.localFwd, -1, 1.4))
+			local rHipRX = (-14 * idleWeight) - (sinW * (34 + STATE.sprintBlend * 22) * STATE.walkBlend * clamp(STATE.localFwd, -1, 1.4))
+			local lHipRZ = (-5 * idleWeight) + (sinW * 24 * STATE.walkBlend * STATE.localStrafe)
+			local rHipRZ = (5 * idleWeight) - (sinW * 24 * STATE.walkBlend * STATE.localStrafe)
+			local lHipRY, rHipRY = 8 * idleWeight, -8 * idleWeight
+
+			local lKneeRX = -8 - math.max(0, sinW) * (36 + STATE.sprintBlend * 20) * STATE.walkBlend
+			local rKneeRX = -8 - math.max(0, -sinW) * (36 + STATE.sprintBlend * 20) * STATE.walkBlend
+			local lAnkleRX = 4 + (sinW * 14 * STATE.walkBlend)
+			local rAnkleRX = 4 - (sinW * 14 * STATE.walkBlend)
+
+			if STATE.slide.active then
+				lHipRX, rHipRX = 64, -18
+				lHipRZ, rHipRZ = -8, 12
+				lKneeRX, rKneeRX = -18, -74
+				lAnkleRX, rAnkleRX = -24, 18
+			elseif STATE.airBlend > 0.01 then
+				local riseT = clamp((STATE.vertVel + 16) / 40, 0, 1)
+				lHipRX = lerp(lHipRX, lerp(22, 42, riseT), STATE.airBlend)
+				rHipRX = lerp(rHipRX, lerp(-16, -28, riseT), STATE.airBlend)
+				lHipRZ, rHipRZ = lerp(lHipRZ, -8, STATE.airBlend), lerp(rHipRZ, 8, STATE.airBlend)
+				lKneeRX = lerp(lKneeRX, lerp(-32, -74, riseT), STATE.airBlend)
+				rKneeRX = lerp(rKneeRX, lerp(-20, -48, riseT), STATE.airBlend)
+				lAnkleRX, rAnkleRX = lerp(lAnkleRX, 24, STATE.airBlend), lerp(rAnkleRX, 18, STATE.airBlend)
+			end
+
+			local lArmRX = (-12 + math.sin(t * 2.6 + 0.5) * 3.5) * idleWeight - (sinW * (28 + STATE.sprintBlend * 26) * STATE.walkBlend)
+			local lArmRY = 10 * idleWeight
+			local lArmRZ = (-9 - math.sin(t * 1.8) * 1.5) * idleWeight - STATE.airBlend * 28
+
+			local rArmRX = (72 + math.sin(t * 2.6) * 2.5) * idleWeight + (34 + cosW * 8) * STATE.walkBlend + (STATE.sprintBlend * 14) + camPitch * 0.7
+			local rArmRY = (-12 * idleWeight) + camYawLocal * 0.35
+			local rArmRZ = 6 * idleWeight + STATE.airBlend * 16
+			local lElbowRX, rElbowRX = 24, 18
+			local lWristRX, lWristRY, lWristRZ = 0, 0, 0
+			local rWristRX, rWristRY, rWristRZ = 0, 0, 0
+			local torsoYawMod = 0
+
+			local pa = STATE.custom.parryAttack
+			local ca = STATE.custom.coinAttack
+
+			if pa.active then
+				local el = now - pa.startTime
+				if el < 0.08 then
+					local k = easeOutQuad(el / 0.08)
+					lArmRX, lArmRY, lArmRZ = lerp(lArmRX, -38, k), lerp(lArmRY, 25, k), lerp(lArmRZ, -22, k)
+					torsoYawMod -= 22 * k
+				elseif el < 0.24 then
+					local k = easeOutBack((el - 0.08) / 0.12)
+					lArmRX, lArmRY, lArmRZ = lerp(-38, 96, k), lerp(25, -14, k), lerp(-22, 6, k)
+					lElbowRX = lerp(lElbowRX, 8, k)
+					lWristRX = lerp(lWristRX, 16, k)
+					rArmRX = lerp(rArmRX, 18, k)
+					torsoYawMod += 32 * k
+					torsoPitch -= 12 * k
+
+					if not pa.hitTriggered and el >= 0.10 then
+						pa.hitTriggered = true
+						local fistWorld = (hrp.CFrame * C(-1.0, 0.5, -2.4)).Position
+						if ca.active and not ca.shotFired and not ca.punched then
+							ca.punched, ca.shotFired = true, true
+							local cPos = ca.coinCF.Position
+							local targetPos, targetChar = findNearestCoinTarget(c, cPos, (hrp.CFrame * C(0, 0.6, -COIN_RANGE)).Position)
+							fireRicochetBeams(STATE, fistWorld, cPos, targetPos, true)
+							Core.playSFX("PARRY", 1.0, 1.0)
+							Core.spawnFlash(cPos, PALETTE.COIN_GOLD, 1.2, 5.4, 0.24)
+							Core.triggerHitstop(0.13, PALETTE.COIN_GOLD)
+							Core.addStyleBonus("FISTFUL OF DOLLAR", 320, PALETTE.COIN_GOLD)
+							if targetChar then Core.applyF3XKnockback(targetChar, targetPos - cPos, COIN_PUNCH_KNOCKBACK_POWER) end
+						else
+							local targetChar, targetHRP = findNearestMeleeTarget(c, hrp)
+							if targetChar and targetHRP then
+								Core.playSFX("PARRY", 1.0, 1.0)
+								Core.triggerHitstop(0.10, PALETTE.PARRY_FLASH)
+								Core.spawnFlash(targetHRP.Position, PALETTE.PARRY_FLASH, 1.0, 4.8, 0.22)
+								Core.spawnShockwaveRing(targetHRP.Position, (targetHRP.Position - hrp.Position), PALETTE.PARRY_FLASH, 1.0, 6.5, 0.24)
+								Core.addStyleBonus("PARRY", 250, PALETTE.PARRY_FLASH)
+								Core.applyF3XKnockback(targetChar, targetHRP.Position - hrp.Position, PARRY_KNOCKBACK_POWER)
+							else
+								Core.playSFX("PUNCH", 1.05, 1.0, "PARRY")
+								Core.spawnFlash(fistWorld, PALETTE.PARRY_FLASH, 0.8, 3.6, 0.20)
+							end
+						end
+					end
+				elseif el < 0.36 then
+					local k = easeOutQuad((el - 0.24) / 0.12)
+					lArmRX, lArmRY, lArmRZ = lerp(96, lArmRX, k), lerp(-14, lArmRY, k), lerp(6, lArmRZ, k)
+					torsoYawMod += 32 * (1 - k)
+				else
+					pa.active = false
+				end
+			end
+
+			if ca.active and not ca.punched then
+				local el = now - ca.startTime
+				if el < 0.16 then
+					local k = easeOutQuad(el / 0.16)
+					lArmRX, lArmRZ = lerp(lArmRX, 72, k), lerp(lArmRZ, 14, k)
+				elseif el < 0.30 then
+					local k = easeOutQuad((el - 0.16) / 0.14)
+					lArmRX, lArmRZ = lerp(72, lArmRX, k), lerp(14, lArmRZ, k)
+				end
+				if el < 0.48 then
+					local aimK = easeOutQuad(el / 0.28)
+					rArmRX, rArmRY, rArmRZ = lerp(rArmRX, 102 + camPitch * 0.65, aimK), lerp(rArmRY, 12, aimK), lerp(rArmRZ, -6, aimK)
+					rElbowRX = lerp(rElbowRX, 12, aimK)
+					rWristRX = lerp(rWristRX, 18, aimK)
+				elseif el < 0.68 then
+					local rec = (el < 0.58) and (32 * easeOutQuad((el - 0.48) / 0.10)) or (32 * (1 - easeOutQuad((el - 0.58) / 0.10)))
+					rArmRX, rArmRY = 102 + camPitch * 0.65 + rec, 12
+				end
+			end
+
+			local torsoCF = hrp.CFrame * C(0, torsoY, 0) * angles(torsoPitch + dashTilt, idleYaw + walkTwist + torsoYawMod, torsoRoll + dashRoll)
+			local chestCF = torsoCF * C(0, V1_CHEST_OFFSET, 0)
+			local abdomenCF = torsoCF * C(0, V1_ABDOMEN_OFFSET, 0) * angles(torsoPitch * 0.3, -walkTwist * 0.35, torsoRoll * 0.25)
+			local pelvisCF = torsoCF * C(0, V1_PELVIS_OFFSET, 0) * angles(-torsoPitch * 0.18, 0, -torsoRoll * 0.35)
+
+			local shoulderLCF = chestCF * C(-1.06, 0.24, 0) * angles(lArmRX, lArmRY, lArmRZ)
+			local shoulderRCF = chestCF * C(1.06, 0.24, 0) * angles(rArmRX, rArmRY, rArmRZ)
+			local elbowLCF = shoulderLCF * C(0, -V1_UPPER_ARM_LEN, 0) * angles(lElbowRX, 0, 0)
+			local elbowRCF = shoulderRCF * C(0, -V1_UPPER_ARM_LEN, 0) * angles(rElbowRX, 0, 0)
+			local wristLCF = elbowLCF * C(0, -V1_FOREARM_LEN, 0) * angles(lWristRX, lWristRY, lWristRZ)
+			local wristRCF = elbowRCF * C(0, -V1_FOREARM_LEN, 0) * angles(rWristRX, rWristRY, rWristRZ)
+
+			local hipLCF = pelvisCF * C(-0.46, V1_HIP_Y, 0) * angles(lHipRX, lHipRY, lHipRZ)
+			local hipRCF = pelvisCF * C(0.46, V1_HIP_Y, 0) * angles(rHipRX, rHipRY, rHipRZ)
+			local kneeLCF = hipLCF * C(0, -V1_THIGH_LEN, 0) * angles(lKneeRX, 0, 0)
+			local kneeRCF = hipRCF * C(0, -V1_THIGH_LEN, 0) * angles(rKneeRX, 0, 0)
+			local ankleLCF = kneeLCF * C(0, -V1_SHIN_LEN, 0) * angles(lAnkleRX, 0, 0)
+			local ankleRCF = kneeRCF * C(0, -V1_SHIN_LEN, 0) * angles(rAnkleRX, 0, 0)
+
+			if inFP and cam and STATE.fpArms then
+				local bobX = cosW * 0.03 * STATE.walkBlend
+				local bobY = math.abs(sinW) * 0.04 * STATE.walkBlend
+				local fpRecoil = 0
+				if ca.active and not ca.punched then
+					local el = now - ca.startTime
+					if el >= 0.48 and el < 0.68 then
+						fpRecoil = (el < 0.58) and (30 * easeOutQuad((el - 0.48) / 0.10)) or (30 * (1 - easeOutQuad((el - 0.58) / 0.10)))
+					end
+				end
+				local punchReach = pa.active and math.sin(clamp((now - pa.startTime) / 0.24, 0, 1) * math.pi) * 1.15 or 0
+
+				local camBase = cam.CFrame * C(0, -0.92, 0.12)
+				shoulderRCF = camBase * C(0.42 + bobX, 0.12 - bobY, 0.22) * angles(58 + fpRecoil * 0.5, 26, -14)
+				elbowRCF = shoulderRCF * C(0, -V1_UPPER_ARM_LEN, 0) * angles(52 + fpRecoil, 0, 6)
+				wristRCF = elbowRCF * C(0, -V1_FOREARM_LEN, 0) * angles(-46 + fpRecoil * 0.4, 8, -10)
+
+				shoulderLCF = camBase * C(-0.40 - bobX, 0.10 - bobY, 0.18) * angles(62 - punchReach * 22, -24, 14)
+				elbowLCF = shoulderLCF * C(0, -V1_UPPER_ARM_LEN, 0) * angles(46 - punchReach * 30, 0, -8)
+				wristLCF = elbowLCF * C(0, -V1_FOREARM_LEN, 0) * angles(-38, -6, 10)
+			end
+
+			local J = {
+				lUpperArm = shoulderLCF, rUpperArm = shoulderRCF,
+				lForearm = elbowLCF, rForearm = elbowRCF,
+				lHand = wristLCF, rHand = wristRCF,
+				lThigh = hipLCF, rThigh = hipRCF,
+				lShin = kneeLCF, rShin = kneeRCF,
+				lFoot = ankleLCF, rFoot = ankleRCF,
+			}
+
+			local cfs = {
+				chest = chestCF, abdomen = abdomenCF, pelvis = pelvisCF,
+				["Torso"] = torsoCF,
+				["Head"] = chestCF * C(0, 1.06, -0.06) * angles(headRX, headRY, headRZ),
+				["Left Arm"] = wristLCF,
+				["Right Arm"] = wristRCF,
+				["Left Leg"] = ankleLCF,
+				["Right Leg"] = ankleRCF,
+			}
+
+			local B = STATE.buckets
+			local fpBodyHide = inFP and 1 or 0
+
+			for _, hp in ipairs(B.v1head or {}) do
+				if hp.part and hp.part.Parent then
+					hp.targetCF = cfs["Head"] * hp.relCF
+					hp.part.CFrame = hp.targetCF
+					hp.part.LocalTransparencyModifier = fpBodyHide
+				end
+			end
+
+			for _, cp in ipairs(B.v1chest or {}) do
+				if cp.part and cp.part.Parent and cfs[cp.key] then
+					cp.targetCF = cfs[cp.key] * cp.relCF
+					cp.part.CFrame = cp.targetCF
+					cp.part.LocalTransparencyModifier = fpBodyHide
+				end
+			end
+
+			for _, kind in ipairs({ "v1upperArm", "v1forearm", "v1hand", "v1thigh", "v1shin", "v1foot" }) do
+				for _, jp in ipairs(B[kind] or {}) do
+					if jp.part and jp.part.Parent and J[jp.key] then
+						jp.targetCF = J[jp.key] * jp.relCF
+						jp.part.CFrame = jp.targetCF
+						local hide = false
+						if inFP then
+							if STATE.fpArms then
+								local isArm = (jp.key == "rUpperArm" or jp.key == "rForearm" or jp.key == "rHand"
+									or jp.key == "lUpperArm" or jp.key == "lForearm" or jp.key == "lHand")
+								hide = not isArm
+							else
+								hide = true
+							end
+						end
+						jp.part.LocalTransparencyModifier = hide and 1 or 0
+					end
+				end
+			end
+
+			local gunRoot = wristRCF * GUN_MOUNT_REL
+			local coinReady = (now - ca.lastUsed) >= COIN_COOLDOWN
+			local neonCol = coinReady and PALETTE.MARKSMAN_GREEN or Color3.fromRGB(28, 70, 42)
+			local gunHide = (inFP and not STATE.fpArms) and 1 or 0
+			for _, gp in ipairs(B.v1gun or {}) do
+				if gp.part and gp.part.Parent then
+					if gp.gunNeon then gp.part.Color = neonCol end
+					gp.targetCF = gunRoot * gp.relCF
+					gp.part.CFrame = gp.targetCF
+					gp.part.LocalTransparencyModifier = gunHide
+				end
+			end
+
+			for _, cp in ipairs(B.v1core or {}) do
+				if cp.part and cp.part.Parent then
+					cp.targetCF = chestCF * cp.relCF
+					cp.part.CFrame = cp.targetCF
+					cp.part.LocalTransparencyModifier = fpBodyHide
+				end
+			end
+
+			local baseFan = { 48, 18, -14, -46 }
+			local flare = STATE.sprintBlend * 16 + STATE.airBlend * 22 + (pa.active and 14 or 0) + (ca.shotFired and not ca.beamsHidden and 10 or 0)
+			local sweepBack = 24 + STATE.walkBlend * 10 + STATE.sprintBlend * 24 + STATE.airBlend * 12 + (STATE.dash.active and 32 or 0)
+			local wingRoots = {}
+			for _, side in ipairs({ -1, 1 }) do
+				wingRoots[side] = {}
+				for idx = 1, 4 do
+					local breath = math.sin(STATE.time * 2.8 - idx * 0.45) * (3.0 + STATE.walkBlend * 2.5)
+					wingRoots[side][idx] = chestCF * C(side * 0.36, 0.50 - (idx - 1) * 0.21, 0.76) * angles(0, -sweepBack * side, (baseFan[idx] + flare + breath) * side)
+				end
+			end
+			for _, wp in ipairs(B.v1wing or {}) do
+				if wp.part and wp.part.Parent then
+					wp.targetCF = wingRoots[wp.side][wp.wingIdx] * wp.relCF
+					wp.part.CFrame = wp.targetCF
+					wp.part.LocalTransparencyModifier = fpBodyHide
+				end
+			end
+
+			if ca.active then
+				local elapsed = now - ca.startTime
+				if STATE.coinPart and STATE.coinPart.part and STATE.coinPart.part.Parent then
+					if not ca.shotFired then
+						local coinPos = ca.tossPos + ca.tossVel * elapsed + V(0, -18 * elapsed * elapsed, 0)
+						ca.coinCF = C(coinPos) * CFrame.Angles(elapsed * 26, elapsed * 16, 0)
+						STATE.coinPart.targetCF, STATE.coinPart.part.CFrame = ca.coinCF, ca.coinCF
+					end
+					if elapsed >= 0.48 and not ca.shotFired and not ca.punched then
+						ca.shotFired = true
+						local gunTip = (gunRoot * GUN_MUZZLE_LOCAL).Position
+						local cPos = ca.coinCF.Position
+						local targetPos, targetChar = findNearestCoinTarget(c, cPos, (hrp.CFrame * C(0, 0.6, -COIN_RANGE)).Position)
+						fireRicochetBeams(STATE, gunTip, cPos, targetPos, false)
+						Core.playSFX("SHATTER", 1.2, 0.9, "PARRY")
+						Core.spawnFlash(gunTip, PALETTE.YELLOW_NEON, 0.8, 3.0, 0.16)
+						Core.spawnShockwaveRing(cPos, (targetPos - cPos), PALETTE.COIN_GOLD, 0.6, 3.8, 0.20)
+						if targetChar then
+							Core.addStyleBonus("RICOSHOT", 200, PALETTE.BEAM_CYAN)
+							Core.applyF3XKnockback(targetChar, targetPos - cPos, COIN_KNOCKBACK_POWER)
+						end
+					end
+				end
+				if elapsed >= 0.66 and not ca.beamsHidden then
+					ca.beamsHidden = true
+					if STATE.coinPart and STATE.coinPart.part then
+						STATE.coinPart.targetCF, STATE.coinPart.part.CFrame = PARK_CF, PARK_CF
+						Core.syncPartMaterial({ { Part = STATE.coinPart.part, Transparency = 1 } })
+					end
+				end
+				if elapsed >= 0.78 then ca.active = false end
+			end
+
+			return {
+				weaponTitle = "MARKSMAN REVOLVER",
+				weaponColor = PALETTE.MARKSMAN_GREEN,
+				chargeFrac = clamp((now - ca.lastUsed) / COIN_COOLDOWN, 0, 1),
+				pipColor = PALETTE.COIN_GOLD,
+				pipDimColor = Color3.fromRGB(165, 130, 32),
+			}, cfs
+		end,
+	})
 end
