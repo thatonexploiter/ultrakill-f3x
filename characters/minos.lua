@@ -1,1404 +1,976 @@
--- ULTRAKILL // MINOS PRIME (P-1: SOUL SURVIVOR) F3X CHARACTER MODULE
--- Path: characters/minos.lua
--- Architecture: return function(Core) -> { cleanup = fn, rebuild = fn, ... }
--- Features:
---   * Authentic Minos Prime F3X Rig (translucent bluish-white body, glowing red heart,
---     branching circulatory veins, sunken black face void, uneven rectangular prism crown,
---     and twin segmented serpents coiled around both forearms)
---   * Full P-1 Moveset (Thy End Is Now 4-hit + Uppercut cancel, Prepare Thyself 2-kick +
---     homing Golden Serpent, Judgement teleport dropkick with gold parry flash, Die! midair
---     rider kick + shockwave, Crush! ground slam, Phase 2 "WEAK." enrage)
---   * PC + Mobile Touch HUD in SmileOS 2.0 / ULTRAKILL style
---   * Zero unanchored / colliding F3X rig parts (anti-fling safe)
+-- ULTRAKILL MINOS PRIME MODULE (KING OF LUST // PRIME SOUL)
+-- Carregado dinamicamente pelo loader.lua recebendo Core
 
 return function(Core)
-	local Players = game:GetService("Players")
-	local RunService = game:GetService("RunService")
 	local UserInputService = game:GetService("UserInputService")
-	local ReplicatedStorage = game:GetService("ReplicatedStorage")
-	local TweenService = game:GetService("TweenService")
-	local CoreGui = game:GetService("CoreGui")
 
-	local LocalPlayer = Players.LocalPlayer
-	local env = (getgenv and getgenv()) or _G
+	local C, V = Core.C, Core.V
+	local ID_CF, PARK_CF = Core.ID_CF, Core.PARK_CF
+	local clamp, lerp, easeOutQuad, easeOutBack = Core.clamp, Core.lerp, Core.easeOutQuad, Core.easeOutBack
+	local angles, mirrorRelCF = Core.angles, Core.mirrorRelCF
 
-	--// Cleanup any previous Minos instance before booting
-	for _, store in ipairs({ env, _G }) do
-		if type(store.F3XMinosReanimCleanup) == "function" then
-			pcall(store.F3XMinosReanimCleanup)
-		end
-	end
-
-	--// Core Math & Utility Helpers (with safe standalone fallbacks)
-	local C = (Core and Core.C) or CFrame.new
-	local V = (Core and Core.V) or Vector3.new
-	local ID_CF = (Core and Core.ID_CF) or CFrame.new()
-	local PARK_CF = (Core and Core.PARK_CF) or CFrame.new(0, -5000, 0)
-
-	local clamp = (Core and Core.clamp) or function(x, a, b)
-		if x < a then return a end
-		if x > b then return b end
-		return x
-	end
-
-	local lerp = (Core and Core.lerp) or function(a, b, t)
-		return a + (b - a) * t
-	end
-
-	local easeOutQuad = (Core and Core.easeOutQuad) or function(t)
-		return 1 - (1 - t) * (1 - t)
-	end
-
-	local easeOutBack = (Core and Core.easeOutBack) or function(t)
-		local c1 = 1.70158
-		local c3 = c1 + 1
-		return 1 + c3 * ((t - 1) ^ 3) + c1 * ((t - 1) ^ 2)
-	end
-
-	local angles = (Core and Core.angles) or function(rx, ry, rz)
-		return CFrame.Angles(math.rad(rx or 0), math.rad(ry or 0), math.rad(rz or 0))
-	end
-
-	local mirrorRelCF = (Core and Core.mirrorRelCF) or function(cf)
-		local p = cf.Position
-		local rx, ry, rz = cf:ToOrientation()
-		return CFrame.new(-p.X, p.Y, p.Z) * CFrame.Angles(rx, -ry, -rz)
-	end
-
-	--// Authentic Minos Prime Palette
 	local PALETTE = {
-		BODY_SHELL   = Color3.fromRGB(185, 232, 255), -- Pale bluish-white translucent flesh
-		BODY_HIGHLIGHT = Color3.fromRGB(220, 245, 255), -- Bright highlights
-		CROWN_PRISM  = Color3.fromRGB(195, 238, 255), -- Crown rectangular prisms
-		FACE_VOID    = Color3.fromRGB(6, 6, 9),       -- Hollow pitch-black face cavity
-		HEART_RED    = Color3.fromRGB(225, 28, 45),   -- Exposed glowing red heart
-		HEART_CORE   = Color3.fromRGB(255, 75, 90),   -- Pulsing inner heart highlight
-		VEIN_CYAN    = Color3.fromRGB(80, 225, 255),  -- Glowing circulatory veins
-		SERPENT_BODY = Color3.fromRGB(130, 235, 255), -- Coiled forearm snakes
-		SERPENT_EYE  = Color3.fromRGB(255, 215, 75),  -- Snake / parry gold accent
-		GOLD_FLASH   = Color3.fromRGB(255, 210, 65),  -- Parryable Judgement/Serpent flash
-		PHASE2_AURA  = Color3.fromRGB(55, 195, 255),  -- "WEAK!" Phase 2 blue flame
-		SHOCKWAVE    = Color3.fromRGB(115, 235, 255),
+		FLESH_GLASS   = Color3.fromRGB(165, 224, 255), -- Translucent Prime Soul outer shell
+		FLESH_INNER   = Color3.fromRGB(205, 240, 255), -- Sculpted inner muscle definition
+		VEIN_CYAN     = Color3.fromRGB(85, 225, 255),  -- Glowing circulatory veins & spine
+		PRIME_CYAN    = Color3.fromRGB(115, 238, 255), -- Shockwave / aura cyan
+		HEART_RED     = Color3.fromRGB(215, 24, 38),   -- Exposed Prime Heart
+		HEART_CORE    = Color3.fromRGB(255, 95, 110),  -- Heart inner glow
+		FACE_VOID     = Color3.fromRGB(7, 7, 10),      -- Hollow pitch-black face cavity
+		CROWN_ICE     = Color3.fromRGB(185, 234, 255), -- Jagged rectangular prism crown
+		SNAKE_SHELL   = Color3.fromRGB(220, 242, 255), -- Coiled forearm serpents
+		SNAKE_BELLY   = Color3.fromRGB(100, 228, 255), -- Serpent glowing underbelly/eyes
+		SERPENT_GOLD  = Color3.fromRGB(255, 212, 60),  -- Homing golden Serpent projectile
+		JUDGEMENT_GOLD = Color3.fromRGB(255, 235, 130), -- Parry-flash & Judgement explosion
 	}
 
-	local CONFIG = {
-		SCALE = 1.12,
-		SOLE_DEPTH = 3.66,
-		CHEST_OFFSET = 0.56,
-		ABDOMEN_OFFSET = -0.22,
-		PELVIS_OFFSET = -0.80,
-		SHOULDER_X = 1.28,
-		SHOULDER_Y = 0.24,
-		UPPER_ARM_LEN = 1.02,
-		HIP_X = 0.48,
-		HIP_Y = -0.18,
-		THIGH_LEN = 1.18,
-		WALK_SPEED = 20,
-		SPRINT_SPEED = 36,
-		DASH_SPEED = 88,
-		MAX_STAMINA = 3,
-		STAMINA_REGEN_SEC = 1.15,
-		SYNC_BATCH_SIZE = 80,
-		MAX_FX_PARTS = 14,
-	}
+	-- Exact Proportions Aligned to V1/Core Rig Grounding
+	local MINOS_CHEST_OFFSET = 0.56
+	local MINOS_ABDOMEN_OFFSET = -0.22
+	local MINOS_PELVIS_OFFSET = -0.80
+	local MINOS_HIP_Y = -0.14
+	local MINOS_THIGH_LEN = 1.18
+	local MINOS_SHIN_LEN = 1.16
+	local MINOS_SOLE_DEPTH_FROM_ANKLE = 0.38
+	local MINOS_SOLE_DEPTH = math.abs(MINOS_PELVIS_OFFSET) + math.abs(MINOS_HIP_Y) + MINOS_THIGH_LEN + MINOS_SHIN_LEN + MINOS_SOLE_DEPTH_FROM_ANKLE -- 3.66
+	local MINOS_UPPER_ARM_LEN = 1.04
+	local MINOS_FOREARM_LEN = 1.00
 
-	--// Runtime State
-	local alive = true
-	local isBuilding = false
-	local state = {
-		mode = "IDLE", -- IDLE, BOXING, KICK_COMBO, JUDGEMENT, DIE_DIVE, CRUSH, DASH
-		phase2 = false,
-		stamina = CONFIG.MAX_STAMINA,
-		staminaAccum = 0,
-		comboStep = 0,
-		comboResetAt = 0,
-		actionStartedAt = 0,
-		actionDuration = 0,
-		cooldowns = {
-			punch = 0,
-			snake = 0,
-			judgement = 0,
-			drop = 0,
-			dash = 0,
-		},
-		walkCycle = 0,
-		calloutText = "AWAITING PREY",
-		calloutUntil = 0,
-		parryFlashUntil = 0,
-		lastVisualTintState = "BASE", -- BASE, PARRY, PHASE2
-		aimPoint = nil,
-		diveStartPos = nil,
-		diveTargetPos = nil,
-	}
+	-- Combat Tuning
+	local SERPENT_COOLDOWN = 0.95
+	local SERPENT_RANGE = 95
+	local SERPENT_SPEED = 86
+	local JUDGEMENT_COOLDOWN = 1.45
+	local JUDGEMENT_RANGE = 76
+	local COMBO_COOLDOWN = 0.24
+	local COMBO_RANGE = 11.5
 
-	local connections = {}
-	local function trackConn(c)
-		table.insert(connections, c)
-		return c
-	end
+	local PUNCH_KNOCKBACK = { speed = 56, up = 22, spin = 9.0 }
+	local UPPERCUT_KNOCKBACK = { speed = 42, up = 64, spin = 12.0 }
+	local FINISHER_KNOCKBACK = { speed = 88, up = 34, spin = 15.0 }
+	local SERPENT_KNOCKBACK = { speed = 78, up = 30, spin = 13.5 }
+	local JUDGEMENT_KNOCKBACK = { speed = 108, up = 48, spin = 18.0 }
+	local CRUSH_KNOCKBACK = { speed = 76, up = 44, spin = 14.0 }
 
-	local rigParts = {}      -- { { part = Instance, limb = string, relCF = CFrame, baseColor = Color3, baseMat = Enum.Material, baseTrans = number, role = string } }
-	local allOwnedParts = {} -- { Instance }
-	local activeProjectiles = {} -- homing serpent projectiles
-	local activeShockwaves = {}  -- expanding shockwave rings
-	local cachedEndpoint = nil
-	local rigModelName = "ULTRAKILL_MINOS_RIG_" .. LocalPlayer.UserId
+	-------------------------------------------------------------------
+	-- SCULPTED MINOS PRIME BLUEPRINTS (TRANSLUCENT SHELL + RED HEART + VEINS + CROWN + SNAKES)
+	-------------------------------------------------------------------
+	local function getMinosHeadSpecs()
+		local specs = {
+			-- Neck + sternocleidomastoid tendons
+			{ partType = "Cylinder", size = V(0.42, 0.34, 0.34), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.32, relCF = C(0, -0.36, 0.06) * angles(0, 0, 90) },
+			{ partType = "Normal",   size = V(0.10, 0.34, 0.10), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,  trans = 0.05, relCF = C(-0.12, -0.34, 0.02) * angles(0, 0, -14) },
+			{ partType = "Normal",   size = V(0.10, 0.34, 0.10), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,  trans = 0.05, relCF = C(0.12, -0.34, 0.02) * angles(0, 0, 14) },
 
-	--// =====================================================================
-	--// F3X ENDPOINT & BATCHING
-	--// =====================================================================
-	local function findEndpointIn(container)
-		if not container then return nil end
-		for _, item in ipairs(container:GetChildren()) do
-			local api = item:FindFirstChild("SyncAPI") or item:FindFirstChild("SyncApi")
-			if api then
-				local ep = api:FindFirstChild("ServerEndpoint") or api:FindFirstChild("ServerControl")
-				if ep and ep:IsA("RemoteFunction") then
-					return ep
-				end
-			end
-		end
-		return nil
-	end
+			-- Hollow pitch-black face void (deep recessed core)
+			{ partType = "Cylinder", size = V(0.56, 0.62, 0.62), color = PALETTE.FACE_VOID, mat = Enum.Material.SmoothPlastic, trans = 0, relCF = C(0, 0.03, -0.14) * angles(0, 90, 0) },
+			{ partType = "Normal",   size = V(0.56, 0.64, 0.36), color = PALETTE.FACE_VOID, mat = Enum.Material.SmoothPlastic, trans = 0, relCF = C(0, 0.03, -0.22) },
 
-	local function getF3XEndpoint(autoRequest)
-		if cachedEndpoint and cachedEndpoint.Parent and cachedEndpoint:IsDescendantOf(game) then
-			return cachedEndpoint
-		end
-		cachedEndpoint = nil
-		for _, cont in ipairs({
-			LocalPlayer.Character,
-			LocalPlayer:FindFirstChild("Backpack"),
-			LocalPlayer:FindFirstChild("PlayerGui"),
-			ReplicatedStorage,
-		}) do
-			local ep = findEndpointIn(cont)
-			if ep then
-				cachedEndpoint = ep
-				return ep
-			end
-		end
-		if autoRequest then
-			pcall(function() Players:Chat(":f3x") end)
-			task.wait(0.45)
-			for _, cont in ipairs({ LocalPlayer.Character, LocalPlayer:FindFirstChild("Backpack") }) do
-				local ep = findEndpointIn(cont)
-				if ep then
-					cachedEndpoint = ep
-					return ep
-				end
-			end
-		end
-		return nil
-	end
+			-- Translucent skull sides, jaw, brow & solid rear cranium framing the face hole
+			{ partType = "Normal",   size = V(0.84, 0.78, 0.44), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.30, relCF = C(0, 0.05, 0.22) },
+			{ partType = "Normal",   size = V(0.16, 0.76, 0.66), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.22, relCF = C(-0.36, 0.04, -0.06) },
+			{ partType = "Normal",   size = V(0.16, 0.76, 0.66), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.22, relCF = C(0.36, 0.04, -0.06) },
+			{ partType = "Normal",   size = V(0.86, 0.16, 0.68), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.20, relCF = C(0, 0.38, -0.06) },
+			{ partType = "Wedge",    size = V(0.74, 0.18, 0.64), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.28, relCF = C(0, -0.32, -0.08) * angles(180, 0, 0) },
 
-	local function invokeBatched(endpoint, action, list)
-		if not endpoint or not list or #list == 0 then return end
-		for i = 1, #list, CONFIG.SYNC_BATCH_SIZE do
-			if not alive then break end
-			local chunk = {}
-			for j = i, math.min(i + CONFIG.SYNC_BATCH_SIZE - 1, #list) do
-				table.insert(chunk, list[j])
-			end
-			pcall(function()
-				endpoint:InvokeServer(action, chunk)
-			end)
-		end
-	end
+			-- Glowing neural/spine core inside skull
+			{ partType = "Ball",     size = V(0.30, 0.34, 0.30), color = PALETTE.VEIN_CYAN, mat = Enum.Material.Neon, trans = 0.08, relCF = C(0, 0.08, 0.14), light = true },
 
-	local function removeParts(endpoint, parts)
-		if not endpoint or not parts or #parts == 0 then return end
-		local valid = {}
-		for _, p in ipairs(parts) do
-			if p and p.Parent ~= nil then
-				table.insert(valid, p)
-			end
-		end
-		if #valid > 0 then
-			invokeBatched(endpoint, "Remove", valid)
-		end
-	end
-
-	--// =====================================================================
-	--// AUTHENTIC MINOS PRIME F3X BLUEPRINT
-	--// =====================================================================
-	-- Roles: "shell", "void", "heart", "vein", "snake", "crown", "aura"
-	local function addSpec(list, partType, size, color, mat, trans, relCF, role, lightColor)
-		table.insert(list, {
-			partType = partType,
-			size = size,
-			color = color,
-			mat = mat,
-			trans = trans,
-			relCF = relCF,
-			role = role or "shell",
-			lightColor = lightColor,
-		})
-	end
-
-	local function getHeadSpecs()
-		local s = {}
-		-- Back & side translucent cranium framing the hollow face cavity
-		addSpec(s, "Normal", V(0.84, 0.86, 0.38), PALETTE.BODY_SHELL, Enum.Material.Glass, 0.34, C(0, 0.04, 0.24), "shell", PALETTE.VEIN_CYAN)
-		addSpec(s, "Normal", V(0.18, 0.82, 0.62), PALETTE.BODY_SHELL, Enum.Material.Glass, 0.34, C(-0.36, 0.04, -0.06), "shell")
-		addSpec(s, "Normal", V(0.18, 0.82, 0.62), PALETTE.BODY_SHELL, Enum.Material.Glass, 0.34, C(0.36, 0.04, -0.06), "shell")
-		addSpec(s, "Normal", V(0.76, 0.18, 0.62), PALETTE.BODY_SHELL, Enum.Material.Glass, 0.34, C(0, 0.40, -0.06), "shell")
-		addSpec(s, "Normal", V(0.68, 0.20, 0.56), PALETTE.BODY_SHELL, Enum.Material.Glass, 0.34, C(0, -0.34, -0.04), "shell")
-
-		-- Sunken pitch-black facial void (signature hollow face hole)
-		addSpec(s, "Cylinder", V(0.46, 0.54, 0.54), PALETTE.FACE_VOID, Enum.Material.SmoothPlastic, 0, C(0, 0.02, -0.08) * angles(0, 0, 90), "void")
-		addSpec(s, "Normal", V(0.50, 0.56, 0.34), PALETTE.FACE_VOID, Enum.Material.SmoothPlastic, 0, C(0, 0.02, -0.18), "void")
-
-		-- Glowing neck column & cranial spine vein
-		addSpec(s, "Cylinder", V(0.42, 0.36, 0.36), PALETTE.BODY_SHELL, Enum.Material.Glass, 0.36, C(0, -0.48, 0.04) * angles(0, 0, 90), "shell")
-		addSpec(s, "Normal", V(0.10, 0.68, 0.10), PALETTE.VEIN_CYAN, Enum.Material.Neon, 0.05, C(0, -0.02, 0.18), "vein")
-
-		-- Crown base collar
-		addSpec(s, "Normal", V(0.84, 0.20, 0.82), PALETTE.CROWN_PRISM, Enum.Material.Glass, 0.30, C(0, 0.48, 0.02), "crown")
-
-		-- Jagged crown of uneven vertical rectangular prisms fused to skull
-		local prisms = {
-			{ x =  0.00, z = -0.32, w = 0.16, h = 0.92, d = 0.16, rx = -6, rz =  0 }, -- Tall front spire
-			{ x = -0.26, z = -0.26, w = 0.15, h = 0.68, d = 0.15, rx = -4, rz =  7 },
-			{ x =  0.26, z = -0.26, w = 0.15, h = 0.74, d = 0.15, rx = -4, rz = -7 },
-			{ x = -0.34, z =  0.04, w = 0.15, h = 0.56, d = 0.16, rx =  0, rz =  9 },
-			{ x =  0.34, z =  0.04, w = 0.15, h = 0.62, d = 0.16, rx =  0, rz = -9 },
-			{ x = -0.22, z =  0.30, w = 0.16, h = 0.82, d = 0.16, rx =  6, rz =  5 },
-			{ x =  0.22, z =  0.30, w = 0.16, h = 0.78, d = 0.16, rx =  6, rz = -5 },
-			{ x =  0.00, z =  0.34, w = 0.18, h = 0.96, d = 0.16, rx =  8, rz =  0 }, -- Tall rear spire
+			-- Jagged Crown of Minos (base collar + 7 uneven rectangular prisms)
+			{ partType = "Normal",   size = V(0.88, 0.16, 0.88), color = PALETTE.CROWN_ICE, mat = Enum.Material.Glass, trans = 0.24, relCF = C(0, 0.48, 0.04) },
+			{ partType = "Normal",   size = V(0.15, 0.78, 0.17), color = PALETTE.CROWN_ICE, mat = Enum.Material.Glass, trans = 0.22, relCF = C(0.00, 0.86, -0.34) * angles(-6, 0, 0) },
+			{ partType = "Normal",   size = V(0.16, 0.96, 0.16), color = PALETTE.CROWN_ICE, mat = Enum.Material.Glass, trans = 0.22, relCF = C(-0.30, 0.94, -0.22) * angles(-4, 18, 5) },
+			{ partType = "Normal",   size = V(0.16, 0.88, 0.16), color = PALETTE.CROWN_ICE, mat = Enum.Material.Glass, trans = 0.22, relCF = C(0.30, 0.90, -0.22) * angles(-4, -18, -5) },
+			{ partType = "Normal",   size = V(0.17, 0.66, 0.18), color = PALETTE.CROWN_ICE, mat = Enum.Material.Glass, trans = 0.22, relCF = C(-0.36, 0.80, 0.14) * angles(4, 0, 7) },
+			{ partType = "Normal",   size = V(0.17, 0.72, 0.18), color = PALETTE.CROWN_ICE, mat = Enum.Material.Glass, trans = 0.22, relCF = C(0.36, 0.83, 0.14) * angles(4, 0, -7) },
+			{ partType = "Normal",   size = V(0.18, 1.02, 0.18), color = PALETTE.CROWN_ICE, mat = Enum.Material.Glass, trans = 0.22, relCF = C(-0.16, 0.96, 0.34) * angles(7, 0, 3) },
+			{ partType = "Normal",   size = V(0.18, 0.84, 0.18), color = PALETTE.CROWN_ICE, mat = Enum.Material.Glass, trans = 0.22, relCF = C(0.18, 0.88, 0.34) * angles(7, 0, -3) },
 		}
-		for _, p in ipairs(prisms) do
-			addSpec(
-				s,
-				"Normal",
-				V(p.w, p.h, p.d),
-				PALETTE.CROWN_PRISM,
-				Enum.Material.Glass,
-				0.28,
-				C(p.x, 0.52 + p.h * 0.5, p.z) * angles(p.rx, 0, p.rz),
-				"crown"
-			)
-			-- Faint vertical vein inside tall crown spires
-			if p.h >= 0.80 then
-				addSpec(
-					s,
-					"Normal",
-					V(0.05, p.h * 0.68, 0.05),
-					PALETTE.VEIN_CYAN,
-					Enum.Material.Neon,
-					0.18,
-					C(p.x, 0.52 + p.h * 0.44, p.z) * angles(p.rx, 0, p.rz),
-					"vein"
-				)
-			end
-		end
-		return s
+		return specs
 	end
 
-	local function getChestSpecs()
-		local s = {}
-		-- Translucent muscular upper torso shell
-		addSpec(s, "Normal", V(1.66, 0.84, 0.74), PALETTE.BODY_SHELL, Enum.Material.Glass, 0.38, C(0, 0.08, 0.02), "shell", PALETTE.VEIN_CYAN)
-		addSpec(s, "Wedge", V(0.76, 0.54, 0.24), PALETTE.BODY_HIGHLIGHT, Enum.Material.Glass, 0.42, C(-0.42, 0.16, -0.36) * angles(0, 12, 180), "shell")
-		addSpec(s, "Wedge", V(0.76, 0.54, 0.24), PALETTE.BODY_HIGHLIGHT, Enum.Material.Glass, 0.42, C(0.42, 0.16, -0.36) * angles(0, -12, 180), "shell")
+	local function getMinosChestSpecs()
+		return {
+			-- Outer translucent muscular torso + contoured pec/trap wedges
+			{ partType = "Normal",   size = V(1.78, 0.86, 0.78), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.36, relCF = C(0, 0.12, 0.02) },
+			{ partType = "Wedge",    size = V(0.80, 0.60, 0.26), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(-0.44, 0.18, -0.38) * angles(0, 10, 180) },
+			{ partType = "Wedge",    size = V(0.80, 0.60, 0.26), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(0.44, 0.18, -0.38) * angles(0, -10, 180) },
+			{ partType = "Wedge",    size = V(0.42, 0.34, 0.74), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.28, relCF = C(-0.56, 0.60, 0.04) * angles(0, 0, -22) },
+			{ partType = "Wedge",    size = V(0.42, 0.34, 0.74), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.28, relCF = C(0.56, 0.60, 0.04) * angles(0, 0, 22) },
+			-- Clavicle & shoulder deltoid musculature
+			{ partType = "Ball",     size = V(0.64, 0.64, 0.64), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.34, relCF = C(-1.02, 0.24, 0.02) },
+			{ partType = "Ball",     size = V(0.64, 0.64, 0.64), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.34, relCF = C(1.02, 0.24, 0.02) },
 
-		-- Sculpted deltoid shoulder caps
-		addSpec(s, "Ball", V(0.66, 0.66, 0.66), PALETTE.BODY_SHELL, Enum.Material.Glass, 0.36, C(-0.96, 0.24, 0.02), "shell")
-		addSpec(s, "Ball", V(0.66, 0.66, 0.66), PALETTE.BODY_SHELL, Enum.Material.Glass, 0.36, C(0.96, 0.24, 0.02), "shell")
+			-- Oversized Exposed Red Prime Heart + Inner Pulse Core + Aorta
+			{ partType = "Ball",     size = V(0.46, 0.54, 0.40), color = PALETTE.HEART_RED,  mat = Enum.Material.Neon, trans = 0.04, relCF = C(-0.18, 0.14, -0.10), light = true },
+			{ partType = "Ball",     size = V(0.28, 0.34, 0.26), color = PALETTE.HEART_CORE, mat = Enum.Material.Neon, trans = 0.00, relCF = C(-0.18, 0.14, -0.14) },
+			{ partType = "Cylinder", size = V(0.26, 0.14, 0.14), color = PALETTE.HEART_RED,  mat = Enum.Material.Neon, trans = 0.02, relCF = C(-0.08, 0.42, -0.06) * angles(0, 0, 72) },
 
-		-- OVERSIZED EXPOSED RED HEART + INNER PULSE CORE (offset anatomically left)
-		addSpec(s, "Ball", V(0.46, 0.54, 0.40), PALETTE.HEART_RED, Enum.Material.Neon, 0.05, C(-0.22, 0.10, -0.14), "heart", PALETTE.HEART_RED)
-		addSpec(s, "Ball", V(0.30, 0.36, 0.26), PALETTE.HEART_CORE, Enum.Material.Neon, 0.0, C(-0.20, 0.12, -0.18), "heart")
-		-- Aorta arch rising out of the heart
-		addSpec(s, "Cylinder", V(0.24, 0.16, 0.16), PALETTE.HEART_RED, Enum.Material.Neon, 0.08, C(-0.10, 0.34, -0.10) * angles(0, 0, -25), "heart")
-
-		-- Branching circulatory veins visible inside translucent chest
-		addSpec(s, "Normal", V(0.08, 0.78, 0.08), PALETTE.VEIN_CYAN, Enum.Material.Neon, 0.10, C(0.02, 0.06, -0.06) * angles(0, 0, -14), "vein")
-		addSpec(s, "Normal", V(0.07, 0.62, 0.07), PALETTE.VEIN_CYAN, Enum.Material.Neon, 0.12, C(0.36, 0.18, -0.12) * angles(0, 0, 36), "vein")
-		addSpec(s, "Normal", V(0.07, 0.56, 0.07), PALETTE.VEIN_CYAN, Enum.Material.Neon, 0.12, C(-0.52, 0.20, -0.10) * angles(0, 0, -40), "vein")
-		addSpec(s, "Normal", V(0.06, 0.44, 0.06), PALETTE.VEIN_CYAN, Enum.Material.Neon, 0.15, C(0.56, 0.26, 0.02) * angles(0, 0, 58), "vein")
-		addSpec(s, "Normal", V(0.06, 0.44, 0.06), PALETTE.VEIN_CYAN, Enum.Material.Neon, 0.15, C(-0.58, 0.26, 0.02) * angles(0, 0, -58), "vein")
-		-- Spine column
-		addSpec(s, "Cylinder", V(0.86, 0.22, 0.22), PALETTE.VEIN_CYAN, Enum.Material.Neon, 0.12, C(0, 0.04, 0.18) * angles(0, 0, 90), "vein")
-		return s
-	end
-
-	local function getAbdomenSpecs()
-		local s = {}
-		addSpec(s, "Normal", V(1.16, 0.76, 0.60), PALETTE.BODY_SHELL, Enum.Material.Glass, 0.38, ID_CF, "shell")
-		-- Sculpted translucent ab plates
-		for row = 0, 1 do
-			local y = 0.14 - row * 0.26
-			addSpec(s, "Normal", V(0.42, 0.20, 0.16), PALETTE.BODY_HIGHLIGHT, Enum.Material.Glass, 0.42, C(-0.24, y, -0.28), "shell")
-			addSpec(s, "Normal", V(0.42, 0.20, 0.16), PALETTE.BODY_HIGHLIGHT, Enum.Material.Glass, 0.42, C(0.24, y, -0.28), "shell")
-		end
-		-- Abdominal arteries
-		addSpec(s, "Normal", V(0.09, 0.74, 0.09), PALETTE.VEIN_CYAN, Enum.Material.Neon, 0.12, C(-0.16, 0, -0.08) * angles(0, 0, 8), "vein")
-		addSpec(s, "Normal", V(0.09, 0.74, 0.09), PALETTE.VEIN_CYAN, Enum.Material.Neon, 0.12, C(0.16, 0, -0.08) * angles(0, 0, -8), "vein")
-		return s
-	end
-
-	local function getPelvisSpecs()
-		local s = {}
-		addSpec(s, "Normal", V(1.24, 0.44, 0.62), PALETTE.BODY_SHELL, Enum.Material.Glass, 0.38, ID_CF, "shell")
-		addSpec(s, "Normal", V(0.26, 0.36, 0.66), PALETTE.BODY_HIGHLIGHT, Enum.Material.Glass, 0.34, C(0, -0.04, 0), "shell")
-		addSpec(s, "Normal", V(0.08, 0.42, 0.08), PALETTE.VEIN_CYAN, Enum.Material.Neon, 0.15, C(-0.26, -0.04, -0.08) * angles(0, 0, 26), "vein")
-		addSpec(s, "Normal", V(0.08, 0.42, 0.08), PALETTE.VEIN_CYAN, Enum.Material.Neon, 0.15, C(0.26, -0.04, -0.08) * angles(0, 0, -26), "vein")
-		return s
-	end
-
-	local function getUpperArmSpecs()
-		local s = {}
-		addSpec(s, "Normal", V(0.46, 1.02, 0.46), PALETTE.BODY_SHELL, Enum.Material.Glass, 0.38, C(0, -0.51, 0), "shell")
-		addSpec(s, "Normal", V(0.08, 0.92, 0.08), PALETTE.VEIN_CYAN, Enum.Material.Neon, 0.12, C(0.06, -0.51, -0.06), "vein")
-		return s
-	end
-
-	local function getForearmSpecs()
-		local s = {}
-		addSpec(s, "Normal", V(0.42, 0.96, 0.42), PALETTE.BODY_SHELL, Enum.Material.Glass, 0.38, C(0, -0.48, 0), "shell")
-		-- Fist cap
-		addSpec(s, "Normal", V(0.46, 0.24, 0.46), PALETTE.BODY_HIGHLIGHT, Enum.Material.Glass, 0.32, C(0, -0.92, 0), "shell")
-
-		-- TWIN COILED FOREARM SERPENT (4 angled ring segments + distinct head near wrist)
-		local coils = {
-			{ y = -0.20, yaw =   0, pitch =  14, roll =  16 },
-			{ y = -0.40, yaw =  90, pitch = -14, roll =  16 },
-			{ y = -0.60, yaw = 180, pitch =  14, roll =  16 },
-			{ y = -0.78, yaw = 270, pitch = -14, roll =  16 },
+			-- Glowing Circulatory System (veins branching across ribcage + glowing spine)
+			{ partType = "Normal",   size = V(0.08, 0.74, 0.08), color = PALETTE.VEIN_CYAN, mat = Enum.Material.Neon, trans = 0.05, relCF = C(0.04, 0.06, -0.10) * angles(0, 0, -14), light = true },
+			{ partType = "Normal",   size = V(0.07, 0.60, 0.07), color = PALETTE.VEIN_CYAN, mat = Enum.Material.Neon, trans = 0.05, relCF = C(0.36, 0.18, -0.12) * angles(0, 0, 38) },
+			{ partType = "Normal",   size = V(0.07, 0.56, 0.07), color = PALETTE.VEIN_CYAN, mat = Enum.Material.Neon, trans = 0.05, relCF = C(-0.48, 0.18, -0.10) * angles(0, 0, -40) },
+			{ partType = "Normal",   size = V(0.06, 0.44, 0.06), color = PALETTE.VEIN_CYAN, mat = Enum.Material.Neon, trans = 0.05, relCF = C(0.68, 0.24, -0.04) * angles(0, 0, 56) },
+			{ partType = "Cylinder", size = V(0.88, 0.22, 0.22), color = PALETTE.VEIN_CYAN, mat = Enum.Material.Neon, trans = 0.08, relCF = C(0, 0.08, 0.16) * angles(0, 0, 90) },
 		}
-		for _, coil in ipairs(coils) do
-			addSpec(
-				s,
-				"Normal",
-				V(0.54, 0.12, 0.54),
-				PALETTE.SERPENT_BODY,
-				Enum.Material.SmoothPlastic,
-				0.08,
-				C(0, coil.y, 0) * angles(coil.pitch, coil.yaw, coil.roll),
-				"snake"
-			)
-		end
-		-- Serpent head + glowing gold eye accent resting on outer wrist
-		addSpec(s, "Wedge", V(0.20, 0.18, 0.34), PALETTE.SERPENT_BODY, Enum.Material.Neon, 0.05, C(0.24, -0.84, -0.14) * angles(35, -18, 0), "snake")
-		addSpec(s, "Normal", V(0.22, 0.06, 0.08), PALETTE.SERPENT_EYE, Enum.Material.Neon, 0, C(0.24, -0.80, -0.22) * angles(35, -18, 0), "snake")
-		return s
 	end
 
-	local function getThighSpecs()
-		local s = {}
-		addSpec(s, "Normal", V(0.58, 1.18, 0.58), PALETTE.BODY_SHELL, Enum.Material.Glass, 0.38, C(0, -0.59, 0), "shell")
-		-- Femoral circulatory veins
-		addSpec(s, "Normal", V(0.09, 1.06, 0.09), PALETTE.VEIN_CYAN, Enum.Material.Neon, 0.12, C(0.08, -0.59, -0.08), "vein")
-		addSpec(s, "Normal", V(0.07, 0.90, 0.07), PALETTE.VEIN_CYAN, Enum.Material.Neon, 0.18, C(-0.10, -0.55, 0.06) * angles(0, 0, 8), "vein")
-		return s
-	end
-
-	local function getShinSpecs()
-		local s = {}
-		addSpec(s, "Normal", V(0.48, 1.14, 0.48), PALETTE.BODY_SHELL, Enum.Material.Glass, 0.38, C(0, -0.57, 0), "shell")
-		addSpec(s, "Normal", V(0.07, 0.98, 0.07), PALETTE.VEIN_CYAN, Enum.Material.Neon, 0.16, C(0.04, -0.56, -0.05), "vein")
-		-- Foot base flush with SOLE_DEPTH
-		addSpec(s, "Normal", V(0.50, 0.22, 0.72), PALETTE.BODY_HIGHLIGHT, Enum.Material.Glass, 0.34, C(0, -1.16, -0.12), "shell")
-		return s
-	end
-
-	local function mirrorSpecs(specs)
-		local out = {}
-		for _, item in ipairs(specs) do
-			table.insert(out, {
-				partType = item.partType,
-				size = item.size,
-				color = item.color,
-				mat = item.mat,
-				trans = item.trans,
-				relCF = mirrorRelCF(item.relCF),
-				role = item.role,
-				lightColor = item.lightColor,
-			})
-		end
-		return out
-	end
-
-	--// =====================================================================
-	--// F3X RIG SPAWNER & CLEANUP
-	--// =====================================================================
-	local function scaleRelCF(cf)
-		local p = cf.Position * CONFIG.SCALE
-		local rot = cf - cf.Position
-		return C(p.X, p.Y, p.Z) * rot
-	end
-
-	local function buildRig()
-		if isBuilding then return end
-		isBuilding = true
-
-		local ep = getF3XEndpoint(true)
-		if not ep then
-			isBuilding = false
-			return false, "F3X tool not found"
-		end
-
-		-- Clean previous rig parts
-		if #allOwnedParts > 0 then
-			removeParts(ep, allOwnedParts)
-			table.clear(allOwnedParts)
-			table.clear(rigParts)
-		end
-
-		local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-		local originCF = hrp and hrp.CFrame or C(0, 20, 0)
-
-		local upperArmR = getUpperArmSpecs()
-		local forearmR = getForearmSpecs()
-		local thighR = getThighSpecs()
-		local shinR = getShinSpecs()
-
-		local limbSpecs = {
-			Head = getHeadSpecs(),
-			Chest = getChestSpecs(),
-			Abdomen = getAbdomenSpecs(),
-			Pelvis = getPelvisSpecs(),
-			RightUpperArm = upperArmR,
-			LeftUpperArm = mirrorSpecs(upperArmR),
-			RightForearm = forearmR,
-			LeftForearm = mirrorSpecs(forearmR),
-			RightThigh = thighR,
-			LeftThigh = mirrorSpecs(thighR),
-			RightShin = shinR,
-			LeftShin = mirrorSpecs(shinR),
+	local function getMinosAbdomenSpecs()
+		return {
+			{ partType = "Normal",   size = V(1.18, 0.78, 0.60), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.36, relCF = ID_CF },
+			-- Sculpted 6-pack abs + central glowing artery + iliac veins
+			{ partType = "Normal",   size = V(0.40, 0.18, 0.12), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(-0.22, 0.18, -0.28) },
+			{ partType = "Normal",   size = V(0.40, 0.18, 0.12), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(0.22, 0.18, -0.28) },
+			{ partType = "Normal",   size = V(0.36, 0.18, 0.12), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(-0.20, -0.06, -0.28) },
+			{ partType = "Normal",   size = V(0.36, 0.18, 0.12), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(0.20, -0.06, -0.28) },
+			{ partType = "Normal",   size = V(0.10, 0.74, 0.10), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon, trans = 0.05, relCF = C(0, 0, -0.08) },
+			{ partType = "Normal",   size = V(0.07, 0.70, 0.07), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon, trans = 0.05, relCF = C(-0.22, -0.02, -0.10) * angles(0, 0, 12) },
+			{ partType = "Normal",   size = V(0.07, 0.70, 0.07), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon, trans = 0.05, relCF = C(0.22, -0.02, -0.10) * angles(0, 0, -12) },
 		}
+	end
 
-		local anchorB, collideB, resizeB, colorB, matB, lockB = {}, {}, {}, {}, {}, {}
+	local function getMinosPelvisSpecs()
+		return {
+			{ partType = "Normal",   size = V(1.26, 0.40, 0.62), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.34, relCF = C(0, -0.02, 0) },
+			{ partType = "Wedge",    size = V(0.62, 0.34, 0.32), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(0, -0.06, -0.24) * angles(180, 0, 0) },
+			{ partType = "Cylinder", size = V(1.06, 0.22, 0.22), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon, trans = 0.08, relCF = C(0, -0.12, 0) },
+		}
+	end
 
-		for limbName, specs in pairs(limbSpecs) do
-			for _, spec in ipairs(specs) do
-				if not alive then break end
-				local ok, part = pcall(function()
-					return ep:InvokeServer("CreatePart", spec.partType or "Normal", originCF, workspace)
-				end)
-				if ok and part and typeof(part) == "Instance" then
-					local scaledSize = spec.size * CONFIG.SCALE
-					local scaledRel = scaleRelCF(spec.relCF)
+	local function getMinosUpperArmSpecs()
+		return {
+			{ partType = "Normal", size = V(0.48, 0.96, 0.48), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.34, relCF = C(0, -0.50, 0) },
+			{ partType = "Ball",   size = V(0.46, 0.62, 0.46), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(0, -0.46, -0.04) },
+			{ partType = "Normal", size = V(0.08, 0.88, 0.08), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon, trans = 0.05, relCF = C(0.04, -0.50, -0.08) },
+			{ partType = "Ball",   size = V(0.32, 0.32, 0.32), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.32, relCF = C(0, -MINOS_UPPER_ARM_LEN, 0) },
+		}
+	end
 
-					table.insert(allOwnedParts, part)
-					table.insert(rigParts, {
-						part = part,
-						limb = limbName,
-						relCF = scaledRel,
-						baseColor = spec.color,
-						baseMat = spec.mat,
-						baseTrans = spec.trans,
-						role = spec.role,
-					})
+	local function getMinosForearmSpecs(side)
+		-- Coiled Twin Forearm Serpent wrapped tightly around each forearm!
+		return {
+			{ partType = "Normal", size = V(0.42, 0.94, 0.42), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.34, relCF = C(0, -0.48, 0) },
+			{ partType = "Normal", size = V(0.07, 0.82, 0.07), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon,  trans = 0.05, relCF = C(0, -0.48, -0.05) },
+			-- 4 diagonal serpent coils wrapping the forearm
+			{ partType = "Normal", size = V(0.54, 0.14, 0.54), color = PALETTE.SNAKE_SHELL, mat = Enum.Material.SmoothPlastic, trans = 0.08, relCF = C(0, -0.20, 0) * angles(12, 0, side * 14) },
+			{ partType = "Normal", size = V(0.56, 0.14, 0.56), color = PALETTE.SNAKE_BELLY, mat = Enum.Material.Neon,          trans = 0.10, relCF = C(0, -0.40, 0) * angles(-10, 0, side * -14) },
+			{ partType = "Normal", size = V(0.56, 0.15, 0.56), color = PALETTE.SNAKE_SHELL, mat = Enum.Material.SmoothPlastic, trans = 0.08, relCF = C(0, -0.60, 0) * angles(12, 0, side * 14) },
+			{ partType = "Normal", size = V(0.54, 0.14, 0.54), color = PALETTE.SNAKE_BELLY, mat = Enum.Material.Neon,          trans = 0.10, relCF = C(0, -0.80, 0) * angles(-10, 0, side * -14) },
+			-- Serpent head perched near the wrist facing forward
+			{ partType = "Wedge",  size = V(0.24, 0.22, 0.44), color = PALETTE.SNAKE_SHELL, mat = Enum.Material.SmoothPlastic, trans = 0.05, relCF = C(side * 0.24, -0.88, -0.18) * angles(68, side * 14, 0) },
+			{ partType = "Normal", size = V(0.26, 0.08, 0.10), color = PALETTE.SERPENT_GOLD, mat = Enum.Material.Neon,         trans = 0.00, relCF = C(side * 0.26, -0.84, -0.26) * angles(68, side * 14, 0), light = true },
+		}
+	end
 
-					table.insert(anchorB, { Part = part, Anchored = true })
-					table.insert(collideB, { Part = part, CanCollide = false })
-					table.insert(resizeB, { Part = part, Size = scaledSize, CFrame = originCF })
-					table.insert(colorB, { Part = part, Color = spec.color })
-					table.insert(matB, {
-						Part = part,
-						Material = spec.mat,
-						Transparency = spec.trans,
-						Reflectance = 0,
-					})
-					table.insert(lockB, part)
+	local function getMinosHandSpecs()
+		return {
+			{ partType = "Normal", size = V(0.38, 0.36, 0.42), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.30, relCF = C(0, -0.18, 0) },
+			{ partType = "Normal", size = V(0.42, 0.18, 0.44), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.22, relCF = C(0, -0.34, -0.02) },
+			{ partType = "Normal", size = V(0.14, 0.14, 0.14), color = PALETTE.PRIME_CYAN,  mat = Enum.Material.Neon, trans = 0.05, relCF = C(0, -0.32, -0.18) },
+		}
+	end
 
-					if spec.lightColor then
-						pcall(function()
-							ep:InvokeServer("CreateLights", { { Part = part, LightType = "PointLight" } })
-							ep:InvokeServer("SyncLighting", { {
-								Part = part,
-								LightType = "PointLight",
-								Color = spec.lightColor,
-								Range = 14,
-								Brightness = 1.8,
-							} })
-						end)
-					end
+	local function getMinosThighSpecs()
+		return {
+			{ partType = "Ball",     size = V(0.44, 0.44, 0.44), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.34, relCF = ID_CF },
+			{ partType = "Normal",   size = V(0.60, 1.04, 0.60), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.34, relCF = C(0, -0.58, 0) },
+			{ partType = "Wedge",    size = V(0.50, 0.56, 0.24), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(0, -0.44, -0.28) * angles(6, 0, 0) },
+			{ partType = "Normal",   size = V(0.09, 0.98, 0.09), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon, trans = 0.05, relCF = C(0.06, -0.58, -0.08) },
+			{ partType = "Cylinder", size = V(0.36, 0.28, 0.28), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.32, relCF = C(0, -MINOS_THIGH_LEN, 0) },
+		}
+	end
+
+	local function getMinosShinSpecs()
+		return {
+			{ partType = "Ball",     size = V(0.34, 0.34, 0.34), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.34, relCF = ID_CF },
+			{ partType = "Normal",   size = V(0.48, 1.04, 0.48), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.34, relCF = C(0, -0.58, 0) },
+			{ partType = "Ball",     size = V(0.46, 0.58, 0.42), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.26, relCF = C(0, -0.42, 0.14) },
+			{ partType = "Normal",   size = V(0.08, 0.94, 0.08), color = PALETTE.VEIN_CYAN,   mat = Enum.Material.Neon, trans = 0.05, relCF = C(0, -0.58, -0.06) },
+			{ partType = "Cylinder", size = V(0.28, 0.24, 0.24), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.32, relCF = C(0, -MINOS_SHIN_LEN, 0) },
+		}
+	end
+
+	local function getMinosFootSpecs()
+		return {
+			{ partType = "Normal", size = V(0.38, 0.18, 0.50), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.30, relCF = C(0, -0.10, -0.06) },
+			{ partType = "Normal", size = V(0.42, 0.16, 0.72), color = PALETTE.FLESH_GLASS, mat = Enum.Material.Glass, trans = 0.30, relCF = C(0, -0.25, -0.20) },
+			{ partType = "Wedge",  size = V(0.38, 0.16, 0.32), color = PALETTE.FLESH_INNER, mat = Enum.Material.SmoothPlastic, trans = 0.24, relCF = C(0, -0.25, -0.56) },
+		}
+	end
+
+	local function getSerpentProjectileSpecs()
+		return {
+			{ partType = "Wedge",  size = V(0.48, 0.42, 0.92), color = PALETTE.SERPENT_GOLD,  mat = Enum.Material.Neon, trans = 0, relCF = C(0, 0.08, -0.55) * angles(14, 0, 0), light = true },
+			{ partType = "Normal", size = V(0.42, 0.36, 1.15), color = PALETTE.SERPENT_GOLD,  mat = Enum.Material.Neon, trans = 0, relCF = C(0, 0, 0.35) },
+			{ partType = "Normal", size = V(0.30, 0.26, 1.05), color = PALETTE.PRIME_CYAN,    mat = Enum.Material.Neon, trans = 0.15, relCF = C(0, -0.04, 1.35) },
+			{ partType = "Wedge",  size = V(0.22, 0.22, 0.85), color = PALETTE.JUDGEMENT_GOLD, mat = Enum.Material.Neon, trans = 0.20, relCF = C(0, -0.04, 2.20) * angles(0, 180, 0) },
+		}
+	end
+
+	-------------------------------------------------------------------
+	-- TARGETING HELPERS
+	-------------------------------------------------------------------
+	local function findTargetsInRadius(c, originPos, radius)
+		local hits = {}
+		for _, model in ipairs(Core.getActiveTargetHumanoids(c)) do
+			local tHRP = Core.getTargetRoot(model.Parent)
+			if tHRP and tHRP:IsA("BasePart") then
+				local d = (tHRP.Position - originPos).Magnitude
+				if d <= radius then
+					hits[#hits + 1] = { char = model.Parent, hrp = tHRP, dist = d }
 				end
 			end
 		end
-
-		-- Apply all initial F3X properties in chunks (anchored + non-collidable prevents flinging)
-		invokeBatched(ep, "SyncAnchor", anchorB)
-		invokeBatched(ep, "SyncCollision", collideB)
-		invokeBatched(ep, "SyncResize", resizeB)
-		invokeBatched(ep, "SyncColor", colorB)
-		invokeBatched(ep, "SyncMaterial", matB)
-		if #lockB > 0 then
-			pcall(function() ep:InvokeServer("SetLocked", lockB, true) end)
-		end
-
-		-- Hide real character parts locally so the F3X Minos Prime shell takes over cleanly
-		local char = LocalPlayer.Character
-		if char then
-			for _, desc in ipairs(char:GetDescendants()) do
-				if desc:IsA("BasePart") and desc.Name ~= "HumanoidRootPart" then
-					desc.LocalTransparencyModifier = 1
-				elseif desc:IsA("Decal") then
-					desc.Transparency = 1
-				end
-			end
-		end
-
-		isBuilding = false
-		return true, #rigParts
-	end
-
-	--// =====================================================================
-	--// COMBAT HELPERS: TARGETING, IMPULSE & F3X VFX
-	--// =====================================================================
-	local function setCallout(text, dur, sfxKey)
-		state.calloutText = text
-		state.calloutUntil = os.clock() + (dur or 1.4)
-		if Core and type(Core.playCue) == "function" and sfxKey then
-			pcall(Core.playCue, sfxKey)
-		end
-	end
-
-	local function getAimPosition(maxDist)
-		local cam = workspace.CurrentCamera
-		local char = LocalPlayer.Character
-		local hrp = char and char:FindFirstChild("HumanoidRootPart")
-		if not cam or not hrp then return Vector3.zero end
-
-		local params = RaycastParams.new()
-		params.FilterType = Enum.RaycastFilterType.Exclude
-		local exclude = { char }
-		for _, p in ipairs(allOwnedParts) do table.insert(exclude, p) end
-		params.FilterDescendantsInstances = exclude
-
-		local dist = maxDist or 180
-		local res = workspace:Raycast(cam.CFrame.Position, cam.CFrame.LookVector * dist, params)
-		if res then
-			return res.Position
-		end
-		return cam.CFrame.Position + cam.CFrame.LookVector * dist
-	end
-
-	local function findNearestTarget(centerPos, maxRange)
-		local bestPlr, bestRoot, bestDist = nil, nil, maxRange or 90
-		for _, plr in ipairs(Players:GetPlayers()) do
-			if plr ~= LocalPlayer and plr.Character then
-				local hum = plr.Character:FindFirstChildOfClass("Humanoid")
-				local root = plr.Character:FindFirstChild("HumanoidRootPart")
-				if hum and hum.Health > 0 and root then
-					local d = (root.Position - centerPos).Magnitude
-					if d < bestDist then
-						bestDist = d
-						bestPlr = plr
-						bestRoot = root
-					end
-				end
-			end
-		end
-		return bestPlr, bestRoot, bestDist
-	end
-
-	local function isTargetAirborne(pos, selfPos)
-		if (pos.Y - selfPos.Y) > 4.5 then return true end
-		local _, root = findNearestTarget(pos, 18)
-		if root and (root.Position.Y - selfPos.Y) > 4.5 then
-			return true
-		end
-		return false
-	end
-
-	local function applyAreaHit(centerPos, radius, knockPower, upwardLift)
-		local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-		if not myHrp then return 0 end
-		local hits = 0
-
-		for _, plr in ipairs(Players:GetPlayers()) do
-			if plr ~= LocalPlayer and plr.Character then
-				local root = plr.Character:FindFirstChild("HumanoidRootPart")
-				if root and (root.Position - centerPos).Magnitude <= radius then
-					hits += 1
-					local dir = (root.Position - centerPos)
-					if dir.Magnitude < 0.1 then
-						dir = myHrp.CFrame.LookVector
-					end
-					dir = Vector3.new(dir.X, 0, dir.Z).Unit
-					-- Visual / local knock impulse (FE server damage depends on game tools)
-					pcall(function()
-						root.AssemblyLinearVelocity = dir * (knockPower or 65) + Vector3.new(0, upwardLift or 35, 0)
-					end)
-				end
-			end
-		end
-
-		if Core and type(Core.onHit) == "function" then
-			pcall(Core.onHit, centerPos, radius, knockPower)
-		end
+		table.sort(hits, function(a, b) return a.dist < b.dist end)
 		return hits
 	end
 
-	local function spawnShockwave(centerPos, maxRadius, color)
-		local ep = getF3XEndpoint(false)
-		if not ep or #activeShockwaves >= 4 then return end
-		task.spawn(function()
-			local cf = C(centerPos.X, centerPos.Y, centerPos.Z)
-			local ok, ring = pcall(function()
-				return ep:InvokeServer("CreatePart", "Cylinder", cf * angles(0, 0, 90), workspace)
-			end)
-			if not ok or not ring or typeof(ring) ~= "Instance" then return end
-
-			pcall(function()
-				ep:InvokeServer("SyncAnchor", { { Part = ring, Anchored = true } })
-				ep:InvokeServer("SyncCollision", { { Part = ring, CanCollide = false } })
-				ep:InvokeServer("SyncColor", { { Part = ring, Color = color or PALETTE.SHOCKWAVE } })
-				ep:InvokeServer("SyncMaterial", { { Part = ring, Material = Enum.Material.Neon, Transparency = 0.2, Reflectance = 0 } })
-			end)
-
-			table.insert(activeShockwaves, {
-				part = ring,
-				centerCF = cf * angles(0, 0, 90),
-				startAt = os.clock(),
-				duration = 0.45,
-				maxRadius = maxRadius or 24,
-			})
-		end)
-	end
-
-	local function spawnGoldenSerpent(startPos, targetPos)
-		local ep = getF3XEndpoint(false)
-		if not ep or #activeProjectiles >= 3 then return end
-		task.spawn(function()
-			local dir = (targetPos - startPos)
-			dir = (dir.Magnitude > 0.1) and dir.Unit or Vector3.new(0, 0, -1)
-			local cf = CFrame.lookAt(startPos, startPos + dir)
-
-			local ok, proj = pcall(function()
-				return ep:InvokeServer("CreatePart", "Cylinder", cf * angles(90, 0, 0), workspace)
-			end)
-			if not ok or not proj or typeof(proj) ~= "Instance" then return end
-
-			pcall(function()
-				ep:InvokeServer("SyncAnchor", { { Part = proj, Anchored = true } })
-				ep:InvokeServer("SyncCollision", { { Part = proj, CanCollide = false } })
-				ep:InvokeServer("SyncResize", { { Part = proj, Size = V(1.6, 5.2, 1.6), CFrame = cf * angles(90, 0, 0) } })
-				ep:InvokeServer("SyncColor", { { Part = proj, Color = PALETTE.GOLD_FLASH } })
-				ep:InvokeServer("SyncMaterial", { { Part = proj, Material = Enum.Material.Neon, Transparency = 0.05, Reflectance = 0 } })
-				ep:InvokeServer("CreateLights", { { Part = proj, LightType = "PointLight" } })
-				ep:InvokeServer("SyncLighting", { { Part = proj, LightType = "PointLight", Color = PALETTE.GOLD_FLASH, Range = 16, Brightness = 2.5 } })
-			end)
-
-			table.insert(activeProjectiles, {
-				part = proj,
-				pos = startPos,
-				dir = dir,
-				speed = state.phase2 and 92 or 72,
-				spawnAt = os.clock(),
-				life = 2.4,
-			})
-		end)
-	end
-
-	--// =====================================================================
-	--// P-1 MOVESET ACTIONS
-	--// =====================================================================
-	local function canAct()
-		return alive and not isBuilding and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-	end
-
-	local function triggerBoxingCombo()
-		if not canAct() then return end
-		local now = os.clock()
-		if now < state.cooldowns.punch then return end
-
-		local hrp = LocalPlayer.Character.HumanoidRootPart
-		local aim = getAimPosition(45)
-
-		if now > state.comboResetAt then
-			state.comboStep = 0
-		end
-		state.comboStep = (state.comboStep % 4) + 1
-		state.comboResetAt = now + 1.15
-		state.mode = "BOXING"
-		state.actionStartedAt = now
-		state.actionDuration = state.phase2 and 0.28 or 0.36
-		state.cooldowns.punch = now + (state.phase2 and 0.22 or 0.30)
-
-		-- Cancel mid-combo into Uppercut if target is airborne
-		if state.comboStep >= 2 and isTargetAirborne(aim, hrp.Position) then
-			state.comboStep = 5 -- Uppercut variant
-			setCallout("THY END IS NOW! (UPPERCUT)", 1.3, "uppercut")
-			hrp.AssemblyLinearVelocity = hrp.CFrame.LookVector * 36 + Vector3.new(0, 42, 0)
-			applyAreaHit(hrp.Position + hrp.CFrame.LookVector * 5, 11, 55, 68)
-			return
-		end
-
-		if state.comboStep == 1 then
-			setCallout("THY END IS NOW!", 1.5, "thy_end")
-		elseif state.comboStep == 4 then
-			state.parryFlashUntil = now + 0.35
-			state.actionDuration = state.phase2 and 0.44 or 0.58 -- Ground-stuck fist recovery window
-		end
-
-		-- Dash forward on each strike
-		local flatAim = Vector3.new(aim.X - hrp.Position.X, 0, aim.Z - hrp.Position.Z)
-		local dashDir = (flatAim.Magnitude > 0.5) and flatAim.Unit or hrp.CFrame.LookVector
-		hrp.CFrame = CFrame.lookAt(hrp.Position, hrp.Position + dashDir)
-		hrp.AssemblyLinearVelocity = dashDir * (state.phase2 and 46 or 36) + Vector3.new(0, hrp.AssemblyLinearVelocity.Y, 0)
-
-		local reach = (state.comboStep == 4) and 13 or 9.5
-		local knock = (state.comboStep == 4) and 85 or 42
-		applyAreaHit(hrp.Position + dashDir * 5.5, reach, knock, (state.comboStep == 4) and 40 or 16)
-		if state.comboStep == 4 then
-			spawnShockwave(hrp.Position + dashDir * 5 - Vector3.new(0, 2.5, 0), 16, PALETTE.SHOCKWAVE)
-		end
-	end
-
-	local function triggerPrepareThyself()
-		if not canAct() then return end
-		local now = os.clock()
-		if now < state.cooldowns.snake then return end
-
-		local hrp = LocalPlayer.Character.HumanoidRootPart
-		local aim = getAimPosition(160)
-		local flatAim = Vector3.new(aim.X - hrp.Position.X, 0, aim.Z - hrp.Position.Z)
-		local dashDir = (flatAim.Magnitude > 0.5) and flatAim.Unit or hrp.CFrame.LookVector
-
-		state.mode = "KICK_COMBO"
-		state.actionStartedAt = now
-		state.actionDuration = state.phase2 and 0.68 or 0.86
-		state.cooldowns.snake = now + (state.phase2 and 1.25 or 1.65)
-		state.parryFlashUntil = now + 0.45
-		setCallout("PREPARE THYSELF!", 1.5, "prepare")
-
-		hrp.CFrame = CFrame.lookAt(hrp.Position, hrp.Position + dashDir)
-		hrp.AssemblyLinearVelocity = dashDir * 44 + Vector3.new(0, 12, 0)
-		applyAreaHit(hrp.Position + dashDir * 5, 11, 55, 25)
-
-		-- Second sweeping kick + homing Golden Serpent projectile
-		task.delay(state.phase2 and 0.24 or 0.34, function()
-			if not alive or not LocalPlayer.Character then return end
-			local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-			if not root then return end
-			applyAreaHit(root.Position + root.CFrame.LookVector * 5.5, 11, 60, 28)
-			local targetPos = getAimPosition(160)
-			spawnGoldenSerpent(root.Position + root.CFrame.RightVector * 1.4 + Vector3.new(0, 0.8, 0), targetPos)
-		end)
-	end
-
-	local function triggerJudgement()
-		if not canAct() then return end
-		local now = os.clock()
-		if now < state.cooldowns.judgement then return end
-
-		local hrp = LocalPlayer.Character.HumanoidRootPart
-		state.mode = "JUDGEMENT"
-		state.actionStartedAt = now
-		state.actionDuration = state.phase2 and 0.78 or 0.95
-		state.cooldowns.judgement = now + (state.phase2 and 2.4 or 3.1)
-		state.parryFlashUntil = now + 0.50
-		setCallout("JUDGEMENT!", 1.7, "judgement")
-
-		-- Telegraph crouch, then teleport dropkick + explosive shockwave
-		task.delay(state.phase2 and 0.26 or 0.36, function()
-			if not alive or not LocalPlayer.Character then return end
-			local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-			if not root then return end
-
-			local _, targetRoot = findNearestTarget(root.Position, 75)
-			local destPos
-			if targetRoot then
-				local toTarget = (targetRoot.Position - root.Position)
-				local dir = (toTarget.Magnitude > 0.5) and toTarget.Unit or root.CFrame.LookVector
-				destPos = targetRoot.Position - dir * 5.0 + Vector3.new(0, 1.5, 0)
-				root.CFrame = CFrame.lookAt(destPos, targetRoot.Position)
-			else
-				local aim = getAimPosition(65)
-				local dir = (aim - root.Position)
-				local dist = math.min(dir.Magnitude, 65)
-				local unitDir = (dir.Magnitude > 0.5) and dir.Unit or root.CFrame.LookVector
-				destPos = root.Position + unitDir * math.max(8, dist - 4)
-				root.CFrame = CFrame.lookAt(destPos, destPos + unitDir)
-			end
-
-			root.AssemblyLinearVelocity = root.CFrame.LookVector * 52 + Vector3.new(0, 18, 0)
-			applyAreaHit(root.Position + root.CFrame.LookVector * 4, 16, 110, 52)
-			spawnShockwave(root.Position - Vector3.new(0, 2.2, 0), 26, PALETTE.GOLD_FLASH)
-			if state.phase2 then
-				spawnGoldenSerpent(root.Position + Vector3.new(0, 1.5, 0), getAimPosition(140))
-			end
-		end)
-	end
-
-	local function triggerDieOrCrush()
-		if not canAct() then return end
-		local now = os.clock()
-		if now < state.cooldowns.drop then return end
-
-		local hrp = LocalPlayer.Character.HumanoidRootPart
-		local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-		local airborne = hum and (hum.FloorMaterial == Enum.Material.Air)
-
-		state.actionStartedAt = now
-		state.cooldowns.drop = now + (state.phase2 and 1.6 or 2.1)
-
-		if airborne then
-			-- DIE! Midair Rider Kick
-			local aim = getAimPosition(110)
-			state.mode = "DIE_DIVE"
-			state.actionDuration = 0.68
-			state.diveStartPos = hrp.Position
-			state.diveTargetPos = aim
-			setCallout("DIE!", 1.4, "die")
-
-			local diveDir = (aim - hrp.Position)
-			local u = (diveDir.Magnitude > 0.5) and diveDir.Unit or hrp.CFrame.LookVector
-			hrp.CFrame = CFrame.lookAt(hrp.Position, hrp.Position + Vector3.new(u.X, 0, u.Z))
-			hrp.AssemblyLinearVelocity = u * 105
-
-			task.delay(0.42, function()
-				if not alive or not LocalPlayer.Character then return end
-				local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-				if not root then return end
-				applyAreaHit(root.Position, 16, 88, 42)
-				spawnShockwave(root.Position - Vector3.new(0, 2.5, 0), 24, PALETTE.SHOCKWAVE)
-			end)
-		else
-			-- CRUSH! Ground Slam
-			state.mode = "CRUSH"
-			state.actionDuration = 0.75
-			setCallout("CRUSH!", 1.4, "crush")
-			hrp.AssemblyLinearVelocity = Vector3.new(0, 52, 0) + hrp.CFrame.LookVector * 14
-
-			task.delay(0.38, function()
-				if not alive or not LocalPlayer.Character then return end
-				local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-				if not root then return end
-				root.AssemblyLinearVelocity = Vector3.new(0, -110, 0)
-				task.wait(0.14)
-				if root and root.Parent then
-					applyAreaHit(root.Position, 20, 100, 56)
-					spawnShockwave(root.Position - Vector3.new(0, 2.6, 0), 30, PALETTE.SHOCKWAVE)
-				end
-			end)
-		end
-	end
-
-	local function triggerDash()
-		if not canAct() then return end
-		local now = os.clock()
-		if now < state.cooldowns.dash or state.stamina < 1 then return end
-
-		state.stamina -= 1
-		state.cooldowns.dash = now + 0.25
-		state.mode = "DASH"
-		state.actionStartedAt = now
-		state.actionDuration = 0.22
-
-		local hrp = LocalPlayer.Character.HumanoidRootPart
-		local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-		local moveDir = (hum and hum.MoveDirection.Magnitude > 0.1) and hum.MoveDirection.Unit or hrp.CFrame.LookVector
-		hrp.AssemblyLinearVelocity = moveDir * CONFIG.DASH_SPEED + Vector3.new(0, 8, 0)
-	end
-
-	local function togglePhase2()
-		state.phase2 = not state.phase2
-		if state.phase2 then
-			setCallout("WEAK.", 2.0, "weak")
-			local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-			if hrp then
-				spawnShockwave(hrp.Position - Vector3.new(0, 2.5, 0), 22, PALETTE.PHASE2_AURA)
-			end
-		else
-			setCallout("PHASE 1 RESTORED", 1.2)
-		end
-	end
-
-	--// =====================================================================
-	--// PROCEDURAL POSE & RIG SYNC LOOP
-	--// =====================================================================
-	local lastSyncAt = 0
-	local function computeLimbTransforms(hrp, hum, now)
-		local rootPos = hrp.Position
-		local _, yaw, _ = hrp.CFrame:ToOrientation()
-		local baseRoot = C(rootPos) * CFrame.Angles(0, yaw, 0)
-
-		local vel = hrp.AssemblyLinearVelocity
-		local horizSpeed = Vector3.new(vel.X, 0, vel.Z).Magnitude
-		local airborne = hum and hum.FloorMaterial == Enum.Material.Air
-
-		if horizSpeed > 2 and not airborne then
-			state.walkCycle += (horizSpeed * 0.018)
-		else
-			state.walkCycle += 0.03
-		end
-
-		local t = state.walkCycle
-		local walkAmp = clamp(horizSpeed / 22, 0, 1)
-
-		-- Default Idle / Walk Poses
-		local chestBob = math.sin(t * 2) * (0.04 + walkAmp * 0.05)
-		local chestPitch = walkAmp * -8
-		local headPitch, headYaw = 0, 0
-		local rArmX, rArmY, rArmZ = math.sin(t) * 28 * walkAmp, 0, -10
-		local lArmX, lArmY, lArmZ = -math.sin(t) * 28 * walkAmp, 0, 10
-		local rForeX, lForeX = 18 + math.cos(t) * 14 * walkAmp, 18 - math.cos(t) * 14 * walkAmp
-		local rLegX, lLegX = -math.sin(t) * 32 * walkAmp, math.sin(t) * 32 * walkAmp
-		local rShinX, lShinX = -math.max(0, math.cos(t)) * 34 * walkAmp, -math.max(0, -math.cos(t)) * 34 * walkAmp
-
-		if state.mode ~= "IDLE" then
-			local elapsed = now - state.actionStartedAt
-			local p = clamp(elapsed / math.max(0.05, state.actionDuration), 0, 1)
-			if p >= 1 then
-				state.mode = "IDLE"
-			elseif state.mode == "BOXING" then
-				local swing = math.sin(p * math.pi)
-				if state.comboStep == 5 then
-					-- Uppercut
-					chestPitch = 14 * swing
-					rArmX, rArmZ = 145 * swing, -12
-					rForeX = 35
-					lArmX = -25 * swing
-				elseif state.comboStep % 2 == 1 then
-					-- Left punch
-					chestPitch = -18 * swing
-					lArmX, lArmY = 98 * swing, -22 * swing
-					lForeX = 10
-					rArmX = -24 * swing
-				else
-					-- Right punch / heavy finisher with ground-stuck fist recovery
-					if state.comboStep == 4 then
-						local swing = (p < 0.45) and math.sin((p / 0.45) * math.pi * 0.5) or (1 - (p - 0.45) / 0.55)
-						chestPitch = -32 * swing
-						chestBob = -0.35 * swing
-						rArmX, rArmY = 112 * swing, 16 * swing
-						rForeX = 6
-						lArmX = -28 * swing
-					else
-						local swing = math.sin(p * math.pi)
-						chestPitch = -22 * swing
-						rArmX, rArmY = 102 * swing, 22 * swing
-						rForeX = 8
-						lArmX = -26 * swing
-					end
-				end
-			elseif state.mode == "KICK_COMBO" then
-				if p < 0.5 then
-					local swing = math.sin((p / 0.5) * math.pi)
-					chestPitch = 14 * swing
-					lLegX = 92 * swing
-					lShinX = -15 * swing
-					rLegX = -20 * swing
-					lArmX = 55 * swing
-				else
-					local swing = math.sin(((p - 0.5) / 0.5) * math.pi)
-					chestPitch = 18 * swing
-					rLegX = 100 * swing
-					rShinX = -12 * swing
-					lLegX = -24 * swing
-					rArmX = 72 * swing
-					lArmX = -45 * swing
-				end
-			elseif state.mode == "JUDGEMENT" then
-				if p < 0.38 then
-					-- Telegraph crouch
-					chestBob = -0.55 * easeOutQuad(p / 0.38)
-					chestPitch = -28
-					rArmX, lArmX = -40, -40
-					rLegX, lLegX = 50, 50
-					rShinX, lShinX = -75, -75
-				else
-					-- Explosive dropkick pose
-					local kp = (p - 0.38) / 0.62
-					local swing = math.sin(kp * math.pi)
-					chestPitch = 45 * swing
-					rLegX = 112 * swing
-					lLegX = 85 * swing
-					rShinX, lShinX = -5, -35
-					rArmX, lArmX = -55 * swing, -55 * swing
-				end
-			elseif state.mode == "DIE_DIVE" then
-				chestPitch = -35
-				rLegX, lLegX = 88, -28
-				rShinX, lShinX = -10, -45
-				rArmX, lArmX = -45, 45
-			elseif state.mode == "CRUSH" then
-				local swing = math.sin(p * math.pi)
-				chestPitch = -30 * swing
-				rArmX, lArmX = 140 * swing, 140 * swing
-				rLegX, lLegX = 38 * swing, 38 * swing
-				rShinX, lShinX = -55 * swing, -55 * swing
-			elseif state.mode == "DASH" then
-				chestPitch = -26
-				rArmX, lArmX = -48, -48
-			end
-		elseif airborne then
-			chestPitch = -10
-			rLegX, lLegX = 24, -16
-			rShinX, lShinX = -32, -18
-			rArmX, lArmX = -22, -22
-		end
-
-		local sc = CONFIG.SCALE
-		local rootOffset = baseRoot * C(0, chestBob, 0)
-		local chestCF = rootOffset * C(0, CONFIG.CHEST_OFFSET * sc, 0) * angles(chestPitch, 0, 0)
-		local headCF = chestCF * C(0, 0.84 * sc, 0) * angles(headPitch, headYaw, 0)
-		local abdomenCF = rootOffset * C(0, CONFIG.ABDOMEN_OFFSET * sc, 0) * angles(chestPitch * 0.5, 0, 0)
-		local pelvisCF = rootOffset * C(0, CONFIG.PELVIS_OFFSET * sc, 0)
-
-		local rShoulderCF = chestCF * C(CONFIG.SHOULDER_X * sc, CONFIG.SHOULDER_Y * sc, 0) * angles(rArmX, rArmY, rArmZ)
-		local lShoulderCF = chestCF * C(-CONFIG.SHOULDER_X * sc, CONFIG.SHOULDER_Y * sc, 0) * angles(lArmX, lArmY, lArmZ)
-		local rForeCF = rShoulderCF * C(0, -CONFIG.UPPER_ARM_LEN * sc, 0) * angles(rForeX, 0, 0)
-		local lForeCF = lShoulderCF * C(0, -CONFIG.UPPER_ARM_LEN * sc, 0) * angles(lForeX, 0, 0)
-
-		local rThighCF = pelvisCF * C(CONFIG.HIP_X * sc, CONFIG.HIP_Y * sc, 0) * angles(rLegX, 0, 0)
-		local lThighCF = pelvisCF * C(-CONFIG.HIP_X * sc, CONFIG.HIP_Y * sc, 0) * angles(lLegX, 0, 0)
-		local rShinCF = rThighCF * C(0, -CONFIG.THIGH_LEN * sc, 0) * angles(rShinX, 0, 0)
-		local lShinCF = lThighCF * C(0, -CONFIG.THIGH_LEN * sc, 0) * angles(lShinX, 0, 0)
-
-		return {
-			Head = headCF,
-			Chest = chestCF,
-			Abdomen = abdomenCF,
-			Pelvis = pelvisCF,
-			RightUpperArm = rShoulderCF,
-			LeftUpperArm = lShoulderCF,
-			RightForearm = rForeCF,
-			LeftForearm = lForeCF,
-			RightThigh = rThighCF,
-			LeftThigh = lThighCF,
-			RightShin = rShinCF,
-			LeftShin = lShinCF,
-		}
-	end
-
-	--// =====================================================================
-	--// SMILEOS 2.0 / MINOS PRIME HUD (PC + MOBILE)
-	--// =====================================================================
-	local function getGuiParent()
-		local ok, hui = pcall(function() return gethui and gethui() end)
-		if ok and hui then return hui end
-		local okC = pcall(function() return CoreGui.Name end)
-		if okC then return CoreGui end
-		return LocalPlayer:WaitForChild("PlayerGui")
-	end
-
-	local hudParent = getGuiParent()
-	local oldHud = hudParent:FindFirstChild("ULTRAKILL_MINOS_HUD")
-	if oldHud then oldHud:Destroy() end
-
-	local HudGui = Instance.new("ScreenGui")
-	HudGui.Name = "ULTRAKILL_MINOS_HUD"
-	HudGui.ResetOnSpawn = false
-	HudGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	HudGui.Parent = hudParent
-
-	local HudFrame = Instance.new("Frame")
-	HudFrame.Size = UDim2.fromOffset(310, 74)
-	HudFrame.Position = UDim2.new(0.5, -155, 1, -92)
-	HudFrame.BackgroundColor3 = Color3.fromRGB(10, 12, 16)
-	HudFrame.BorderSizePixel = 0
-	HudFrame.Parent = HudGui
-
-	local hudStroke = Instance.new("UIStroke")
-	hudStroke.Color = PALETTE.VEIN_CYAN
-	hudStroke.Thickness = 1.6
-	hudStroke.Parent = HudFrame
-
-	local HudHeader = Instance.new("TextLabel")
-	HudHeader.Size = UDim2.new(1, -12, 0, 18)
-	HudHeader.Position = UDim2.fromOffset(6, 4)
-	HudHeader.BackgroundTransparency = 1
-	HudHeader.Font = Enum.Font.Code
-	HudHeader.TextSize = 12
-	HudHeader.TextColor3 = PALETTE.VEIN_CYAN
-	HudHeader.TextXAlignment = Enum.TextXAlignment.Left
-	HudHeader.Text = "P-1 // KING OF LUST (PRIME SOUL)"
-	HudHeader.Parent = HudFrame
-
-	local HudCallout = Instance.new("TextLabel")
-	HudCallout.Size = UDim2.new(1, -12, 0, 18)
-	HudCallout.Position = UDim2.fromOffset(6, 22)
-	HudCallout.BackgroundTransparency = 1
-	HudCallout.Font = Enum.Font.Code
-	HudCallout.TextSize = 13
-	HudCallout.TextColor3 = Color3.fromRGB(240, 245, 255)
-	HudCallout.TextXAlignment = Enum.TextXAlignment.Left
-	HudCallout.Text = "> AWAITING PREY"
-	HudCallout.Parent = HudFrame
-
-	local StaminaRow = Instance.new("Frame")
-	StaminaRow.Size = UDim2.new(1, -12, 0, 8)
-	StaminaRow.Position = UDim2.fromOffset(6, 43)
-	StaminaRow.BackgroundTransparency = 1
-	StaminaRow.Parent = HudFrame
-
-	local stamBars = {}
-	for i = 1, CONFIG.MAX_STAMINA do
-		local bar = Instance.new("Frame")
-		bar.Size = UDim2.new(1 / CONFIG.MAX_STAMINA, -4, 1, 0)
-		bar.Position = UDim2.new((i - 1) / CONFIG.MAX_STAMINA, 0, 0, 0)
-		bar.BackgroundColor3 = PALETTE.VEIN_CYAN
-		bar.BorderSizePixel = 0
-		bar.Parent = StaminaRow
-		stamBars[i] = bar
-	end
-
-	local HudKeys = Instance.new("TextLabel")
-	HudKeys.Size = UDim2.new(1, -12, 0, 16)
-	HudKeys.Position = UDim2.fromOffset(6, 54)
-	HudKeys.BackgroundTransparency = 1
-	HudKeys.Font = Enum.Font.Code
-	HudKeys.TextSize = 10
-	HudKeys.TextColor3 = Color3.fromRGB(165, 180, 195)
-	HudKeys.TextXAlignment = Enum.TextXAlignment.Left
-	HudKeys.Text = "[LMB] COMBO [E] SNAKE [F] JUDGE [C] DIE/CRUSH [X] WEAK"
-	HudKeys.Parent = HudFrame
-
-	-- Touch-Friendly Mobile Buttons (always accessible on TouchEnabled, or bottom-right cluster)
-	local MobileCluster = Instance.new("Frame")
-	MobileCluster.Size = UDim2.fromOffset(216, 118)
-	MobileCluster.Position = UDim2.new(1, -228, 1, -142)
-	MobileCluster.BackgroundTransparency = 1
-	MobileCluster.Visible = UserInputService.TouchEnabled
-	MobileCluster.Parent = HudGui
-
-	local function makeMobBtn(txt, col, gx, gy, fn)
-		local b = Instance.new("TextButton")
-		b.Size = UDim2.fromOffset(68, 36)
-		b.Position = UDim2.fromOffset(gx * 72, gy * 40)
-		b.BackgroundColor3 = Color3.fromRGB(14, 16, 22)
-		b.BorderSizePixel = 0
-		b.Font = Enum.Font.Code
-		b.TextSize = 11
-		b.TextColor3 = col
-		b.Text = txt
-		b.Parent = MobileCluster
-		local st = Instance.new("UIStroke")
-		st.Color = col
-		st.Thickness = 1.4
-		st.Parent = b
-		b.Activated:Connect(fn)
-		return b
-	end
-
-	makeMobBtn("PUNCH", PALETTE.BODY_HIGHLIGHT, 0, 0, triggerBoxingCombo)
-	makeMobBtn("SNAKE", PALETTE.GOLD_FLASH, 1, 0, triggerPrepareThyself)
-	makeMobBtn("JUDGE", PALETTE.GOLD_FLASH, 2, 0, triggerJudgement)
-	makeMobBtn("DROP", PALETTE.SHOCKWAVE, 0, 1, triggerDieOrCrush)
-	makeMobBtn("DASH", PALETTE.VEIN_CYAN, 1, 1, triggerDash)
-	makeMobBtn("WEAK", PALETTE.HEART_RED, 2, 1, togglePhase2)
-
-	--// =====================================================================
-	--// INPUT & HEARTBEAT LOOP
-	--// =====================================================================
-	trackConn(UserInputService.InputBegan:Connect(function(input, gp)
-		if gp or not alive then return end
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			triggerBoxingCombo()
-		elseif input.KeyCode == Enum.KeyCode.E then
-			triggerPrepareThyself()
-		elseif input.KeyCode == Enum.KeyCode.F then
-			triggerJudgement()
-		elseif input.KeyCode == Enum.KeyCode.C then
-			triggerDieOrCrush()
-		elseif input.KeyCode == Enum.KeyCode.Q or input.KeyCode == Enum.KeyCode.LeftShift then
-			triggerDash()
-		elseif input.KeyCode == Enum.KeyCode.X then
-			togglePhase2()
-		end
-	end))
-
-	trackConn(RunService.Heartbeat:Connect(function(dt)
-		if not alive then return end
-		local now = os.clock()
-
-		-- Stamina regen
-		if state.stamina < CONFIG.MAX_STAMINA then
-			state.staminaAccum += dt
-			local rate = state.phase2 and (CONFIG.STAMINA_REGEN_SEC * 0.65) or CONFIG.STAMINA_REGEN_SEC
-			if state.staminaAccum >= rate then
-				state.staminaAccum -= rate
-				state.stamina = math.min(CONFIG.MAX_STAMINA, state.stamina + 1)
-			end
-		end
-
-		-- Update HUD
-		for i = 1, CONFIG.MAX_STAMINA do
-			stamBars[i].BackgroundColor3 = (i <= state.stamina) and (state.phase2 and PALETTE.PHASE2_AURA or PALETTE.VEIN_CYAN) or Color3.fromRGB(30, 35, 45)
-		end
-		if now < state.calloutUntil then
-			HudCallout.Text = "> " .. state.calloutText .. (state.phase2 and " [PHASE 2]" or "")
-			HudCallout.TextColor3 = (now < state.parryFlashUntil) and PALETTE.GOLD_FLASH or PALETTE.BODY_HIGHLIGHT
-		else
-			HudCallout.Text = state.phase2 and "> WEAK. (PHASE 2 ENRAGE)" or "> SOUL SURVIVOR READY"
-			HudCallout.TextColor3 = state.phase2 and PALETTE.PHASE2_AURA or Color3.fromRGB(200, 215, 230)
-		end
-
-		local ep = getF3XEndpoint(false)
-		if not ep then return end
-
-		-- Transition-only visual tint for Parry Gold Flash & Phase 2 Enrage Aura
-		local desiredTint = (now < state.parryFlashUntil) and "PARRY" or (state.phase2 and "PHASE2" or "BASE")
-		if desiredTint ~= state.lastVisualTintState and #rigParts > 0 then
-			state.lastVisualTintState = desiredTint
-			local colorChanges = {}
-			for _, item in ipairs(rigParts) do
-				if item.part and item.part.Parent ~= nil then
-					if desiredTint == "PARRY" and (item.role == "vein" or item.role == "snake" or item.role == "crown") then
-						table.insert(colorChanges, { Part = item.part, Color = PALETTE.GOLD_FLASH })
-					elseif desiredTint == "PHASE2" and (item.role == "vein" or item.role == "shell") then
-						local col = (item.role == "vein") and PALETTE.PHASE2_AURA or Color3.fromRGB(145, 220, 255)
-						table.insert(colorChanges, { Part = item.part, Color = col })
-					else
-						table.insert(colorChanges, { Part = item.part, Color = item.baseColor })
-					end
-				end
-			end
-			if #colorChanges > 0 then
-				task.spawn(function()
-					invokeBatched(ep, "SyncColor", colorChanges)
-				end)
-			end
-		end
-
-		-- Update active projectiles & shockwaves
-		local moveList, resizeList, matList, toRemove = {}, {}, {}, {}
-
-		for i = #activeProjectiles, 1, -1 do
-			local p = activeProjectiles[i]
-			if not p.part or p.part.Parent == nil or (now - p.spawnAt) >= p.life then
-				if p.part and p.part.Parent ~= nil then table.insert(toRemove, p.part) end
-				table.remove(activeProjectiles, i)
-			else
-				local _, targetRoot = findNearestTarget(p.pos, 45)
-				if targetRoot then
-					local desired = (targetRoot.Position - p.pos).Unit
-					p.dir = p.dir:Lerp(desired, clamp(dt * 4.5, 0, 1)).Unit
-				end
-				p.pos = p.pos + p.dir * p.speed * dt
-				local cf = CFrame.lookAt(p.pos, p.pos + p.dir) * angles(90, 0, 0)
-				table.insert(moveList, { Part = p.part, CFrame = cf })
-
-				if targetRoot and (targetRoot.Position - p.pos).Magnitude < 4.5 then
-					applyAreaHit(p.pos, 10, 75, 38)
-					spawnShockwave(p.pos, 14, PALETTE.GOLD_FLASH)
-					table.insert(toRemove, p.part)
-					table.remove(activeProjectiles, i)
-				end
-			end
-		end
-
-		for i = #activeShockwaves, 1, -1 do
-			local sw = activeShockwaves[i]
-			local prog = (now - sw.startAt) / sw.duration
-			if not sw.part or sw.part.Parent == nil or prog >= 1 then
-				if sw.part and sw.part.Parent ~= nil then table.insert(toRemove, sw.part) end
-				table.remove(activeShockwaves, i)
-			else
-				local r = lerp(2, sw.maxRadius, easeOutQuad(prog))
-				table.insert(resizeList, { Part = sw.part, Size = V(0.4, r * 2, r * 2), CFrame = sw.centerCF })
-				table.insert(matList, { Part = sw.part, Material = Enum.Material.Neon, Transparency = lerp(0.15, 0.92, prog), Reflectance = 0 })
-			end
-		end
-
-		-- Sync Minos Prime F3X Rig Transforms (~30Hz to keep F3X remotes crisp)
-		local char = LocalPlayer.Character
-		local hrp = char and char:FindFirstChild("HumanoidRootPart")
-		local hum = char and char:FindFirstChildOfClass("Humanoid")
-
-		if hrp and hum and #rigParts > 0 and (now - lastSyncAt) >= 0.032 then
-			lastSyncAt = now
-			hum.WalkSpeed = state.phase2 and CONFIG.SPRINT_SPEED or CONFIG.WALK_SPEED
-			local poses = computeLimbTransforms(hrp, hum, now)
-			for _, item in ipairs(rigParts) do
-				if item.part and item.part.Parent ~= nil then
-					local limbCF = poses[item.limb]
-					if limbCF then
-						table.insert(moveList, { Part = item.part, CFrame = limbCF * item.relCF })
+	local function findNearestTarget(c, originPos, maxDist, forwardLook)
+		local bestChar, bestHRP, bestDist = nil, nil, maxDist
+		for _, model in ipairs(Core.getActiveTargetHumanoids(c)) do
+			local tHRP = Core.getTargetRoot(model.Parent)
+			if tHRP and tHRP:IsA("BasePart") then
+				local diff = tHRP.Position - originPos
+				local d = diff.Magnitude
+				if d > 0.2 and d < bestDist then
+					if not forwardLook or diff.Unit:Dot(forwardLook) > -0.35 or d < 6.0 then
+						bestDist, bestChar, bestHRP = d, model.Parent, tHRP
 					end
 				end
 			end
 		end
-
-		if #moveList > 0 then invokeBatched(ep, "SyncMove", moveList) end
-		if #resizeList > 0 then invokeBatched(ep, "SyncResize", resizeList) end
-		if #matList > 0 then invokeBatched(ep, "SyncMaterial", matList) end
-		if #toRemove > 0 then removeParts(ep, toRemove) end
-	end))
-
-	--// =====================================================================
-	--// LIFECYCLE CONTROLLER (CLEANUP & REBUILD)
-	--// =====================================================================
-	local function rebuild()
-		if not alive then return end
-		buildRig()
+		return bestChar, bestHRP, bestDist
 	end
 
-	local function cleanup()
-		if not alive then return end
-		alive = false
-
-		for _, c in ipairs(connections) do
-			pcall(function() c:Disconnect() end)
+	local function getLookAimPos(cam, hrp, range)
+		if cam then
+			return cam.CFrame.Position + cam.CFrame.LookVector * range
 		end
-		table.clear(connections)
-
-		local ep = getF3XEndpoint(false)
-		if ep then
-			local cleanupList = {}
-			for _, p in ipairs(allOwnedParts) do table.insert(cleanupList, p) end
-			for _, pr in ipairs(activeProjectiles) do if pr.part then table.insert(cleanupList, pr.part) end end
-			for _, sw in ipairs(activeShockwaves) do if sw.part then table.insert(cleanupList, sw.part) end end
-			removeParts(ep, cleanupList)
-		end
-		table.clear(allOwnedParts)
-		table.clear(rigParts)
-		table.clear(activeProjectiles)
-		table.clear(activeShockwaves)
-
-		-- Restore character visibility
-		local char = LocalPlayer.Character
-		if char then
-			for _, desc in ipairs(char:GetDescendants()) do
-				if desc:IsA("BasePart") then
-					desc.LocalTransparencyModifier = 0
-				elseif desc:IsA("Decal") then
-					desc.Transparency = 0
-				end
-			end
-		end
-
-		if HudGui and HudGui.Parent then
-			HudGui:Destroy()
-		end
-
-		for _, store in ipairs({ env, _G }) do
-			if store.F3XMinosReanimCleanup == cleanup then store.F3XMinosReanimCleanup = nil end
-			if store.F3XMinosReanimRebuild == rebuild then store.F3XMinosReanimRebuild = nil end
-		end
+		return hrp.Position + hrp.CFrame.LookVector * range
 	end
 
-	local controller = {
+	-------------------------------------------------------------------
+	-- EXPORTED MODULE FOR CORE
+	-------------------------------------------------------------------
+	Core.start({
 		id = "minos",
-		config = CONFIG,
-		cleanup = cleanup,
-		rebuild = rebuild,
-	}
+		name = "MINOS PRIME",
+		config = {
+			RENDER_NAME = "F3X_Minos_Reanim",
+			HUD_RENDER_NAME = "F3X_Minos_3DHUD",
+			SCALE = 1.06,
+			SOLE_DEPTH = MINOS_SOLE_DEPTH,
 
-	env.F3XMinosReanimCleanup = cleanup
-	_G.F3XMinosReanimCleanup = cleanup
-	env.F3XMinosReanimRebuild = rebuild
-	_G.F3XMinosReanimRebuild = rebuild
-	env.ULTRAKILL_F3X = controller
-	_G.ULTRAKILL_F3X = controller
+			-- Aggressive, fast Prime Soul movement tuning
+			WALK_SPEED = 20,
+			SPRINT_SPEED = 40,
+			JUMP_POWER = 60,
+			AIR_GRAVITY_CANCEL = 0.28,
+			GLIDE_GRAVITY_CANCEL = 0.52,
+			GLIDE_MAX_FALL = 20,
+			AIR_STRAFE_ACCEL = 62,
+			AIR_DRAG = 0.22,
+			SLAM_STORAGE_JUMP = 114,
 
-	-- Auto-rebuild on respawn
-	trackConn(LocalPlayer.CharacterAdded:Connect(function(newChar)
-		newChar:WaitForChild("HumanoidRootPart", 10)
-		task.wait(0.35)
-		if alive then
-			buildRig()
-		end
-	end))
+			HUD_UNIT_HEADER = "P-1 // KING OF LUST",
+			HUD_WEAPON_TITLE = "JUDGEMENT // SERPENT",
+			HUD_WEAPON_COLOR = PALETTE.PRIME_CYAN,
+			HUD_KEY_HINT = "[LMB] BOXING  [E] SERPENT  [F] JUDGEMENT  [C] DIE/CRUSH",
+			BGM_URL = "https://raw.githubusercontent.com/thatonexploiter/ultrakill-f3x/main/audio/order.mp3",
+			BGM_FILE = "minos_order.mp3",
+			BGM_FALLBACK_ID = "rbxassetid://15081073002",
+			BGM_VOLUME = 0.46,
+			HUD_PIP_COLOR = PALETTE.SERPENT_GOLD,
+			MOBILE_PRIMARY_LABEL = "SERPENT",
+			MOBILE_PRIMARY_COLOR = PALETTE.SERPENT_GOLD,
+			MOBILE_SECONDARY_LABEL = "JUDGE",
+			MOBILE_SECONDARY_COLOR = PALETTE.PRIME_CYAN,
+		},
 
-	-- Initial F3X Rig Build
-	buildRig()
-	return controller
+		initState = function()
+			local STATE = Core.getState()
+			STATE.custom.serpent = {
+				active = false,
+				kickPhase = false,
+				projectileActive = false,
+				lastUsed = 0,
+				startTime = 0,
+				kickHit1 = false,
+				kickHit2 = false,
+				launched = false,
+				pos = V(0, 0, 0),
+				vel = V(0, 0, 0),
+				originPos = V(0, 0, 0),
+				targetChar = nil,
+				cf = PARK_CF,
+			}
+			STATE.custom.judgement = {
+				active = false,
+				lastUsed = 0,
+				startTime = 0,
+				teleported = false,
+				exploded = false,
+				flashDone = false,
+				destCF = nil,
+			}
+			STATE.custom.combo = {
+				active = false,
+				step = 0,
+				lastUsed = 0,
+				startTime = 0,
+				hitDone = false,
+				uppercut = false,
+			}
+			STATE.custom.wasSlamming = false
+
+			-- Bind LMB Boxing Combo ("THY END IS NOW!") cleanly, self-disconnecting when unloaded
+			if STATE.custom.lmbConn then
+				pcall(function() STATE.custom.lmbConn:Disconnect() end)
+			end
+			STATE.custom.lmbConn = UserInputService.InputBegan:Connect(function(input, gp)
+				local curState = Core.getState()
+				if curState ~= STATE or not curState.alive then
+					if STATE.custom.lmbConn then
+						pcall(function() STATE.custom.lmbConn:Disconnect() end)
+						STATE.custom.lmbConn = nil
+					end
+					return
+				end
+				if gp or curState.isSettingUp then return end
+				if input.UserInputType == Enum.UserInputType.MouseButton1 then
+					local cb = curState.custom.combo
+					local now = os.clock()
+					if curState.custom.judgement.active then return end
+					if cb.active and (now - cb.startTime) < 0.16 then return end
+					if (now - cb.lastUsed) < COMBO_COOLDOWN then return end
+
+					local resetChain = (now - cb.lastUsed) > 1.05
+					cb.step = resetChain and 1 or ((cb.step % 4) + 1)
+					cb.active = true
+					cb.lastUsed = now
+					cb.startTime = now
+					cb.hitDone = false
+					cb.uppercut = false
+
+					-- Cancel into Uppercut if target is airborne mid-combo
+					local c = Core.getChar()
+					local hrp = c and c:FindFirstChild("HumanoidRootPart")
+					if hrp and cb.step >= 2 then
+						local _, tHRP = findNearestTarget(c, hrp, COMBO_RANGE + 3, hrp.CFrame.LookVector)
+						if tHRP and (tHRP.Position.Y - hrp.Position.Y) > 4.2 then
+							cb.uppercut = true
+						end
+					end
+
+					Core.playSFX("PUNCH", cb.step == 4 and 0.85 or (0.98 + cb.step * 0.06), 0.9, "PARRY")
+				end
+			end)
+		end,
+
+		buildModel = function(_, _, _, _, torsoInitCF)
+			local specs = {}
+			local chestCF = torsoInitCF * C(0, MINOS_CHEST_OFFSET, 0)
+			local abdomenCF = torsoInitCF * C(0, MINOS_ABDOMEN_OFFSET, 0)
+			local pelvisCF = torsoInitCF * C(0, MINOS_PELVIS_OFFSET, 0)
+			local headInitCF = chestCF * C(0, 1.06, -0.04)
+
+			local function addMinos(kind, list, parentCF, key)
+				for _, sp in ipairs(list) do
+					specs[#specs + 1] = {
+						kind = kind,
+						key = key,
+						partType = sp.partType,
+						relCF = sp.relCF,
+						origCF = parentCF * sp.relCF,
+						origSize = sp.size,
+						origColor = sp.color,
+						origMaterial = sp.mat,
+						origTrans = sp.trans or 0,
+						origReflectance = 0,
+						light = sp.light,
+					}
+				end
+			end
+
+			addMinos("minosHead", getMinosHeadSpecs(), headInitCF)
+			addMinos("minosBody", getMinosChestSpecs(), chestCF, "chest")
+			addMinos("minosBody", getMinosAbdomenSpecs(), abdomenCF, "abdomen")
+			addMinos("minosBody", getMinosPelvisSpecs(), pelvisCF, "pelvis")
+
+			local shoulderL = chestCF * C(-1.06, 0.24, 0)
+			local shoulderR = chestCF * C(1.06, 0.24, 0)
+			local elbowL, elbowR = shoulderL * C(0, -MINOS_UPPER_ARM_LEN, 0), shoulderR * C(0, -MINOS_UPPER_ARM_LEN, 0)
+			local wristL, wristR = elbowL * C(0, -MINOS_FOREARM_LEN, 0), elbowR * C(0, -MINOS_FOREARM_LEN, 0)
+
+			addMinos("minosUpperArm", getMinosUpperArmSpecs(), shoulderL, "lUpperArm")
+			addMinos("minosUpperArm", getMinosUpperArmSpecs(), shoulderR, "rUpperArm")
+			addMinos("minosForearm", getMinosForearmSpecs(-1), elbowL, "lForearm")
+			addMinos("minosForearm", getMinosForearmSpecs(1), elbowR, "rForearm")
+			addMinos("minosHand", getMinosHandSpecs(), wristL, "lHand")
+			addMinos("minosHand", getMinosHandSpecs(), wristR, "rHand")
+
+			local hipL = pelvisCF * C(-0.46, MINOS_HIP_Y, 0)
+			local hipR = pelvisCF * C(0.46, MINOS_HIP_Y, 0)
+			local kneeL, kneeR = hipL * C(0, -MINOS_THIGH_LEN, 0), hipR * C(0, -MINOS_THIGH_LEN, 0)
+			local ankleL, ankleR = kneeL * C(0, -MINOS_SHIN_LEN, 0), kneeR * C(0, -MINOS_SHIN_LEN, 0)
+
+			addMinos("minosThigh", getMinosThighSpecs(), hipL, "lThigh")
+			addMinos("minosThigh", getMinosThighSpecs(), hipR, "rThigh")
+			addMinos("minosShin", getMinosShinSpecs(), kneeL, "lShin")
+			addMinos("minosShin", getMinosShinSpecs(), kneeR, "rShin")
+			addMinos("minosFoot", getMinosFootSpecs(), ankleL, "lFoot")
+			addMinos("minosFoot", getMinosFootSpecs(), ankleR, "rFoot")
+
+			-- Homing Golden Serpent Projectile Bucket (parked when inactive)
+			for _, sp in ipairs(getSerpentProjectileSpecs()) do
+				specs[#specs + 1] = {
+					kind = "minosSerpent",
+					partType = sp.partType,
+					relCF = sp.relCF,
+					origCF = PARK_CF,
+					origSize = sp.size,
+					origColor = sp.color,
+					origMaterial = sp.mat,
+					origTrans = sp.trans or 0,
+					origReflectance = 0,
+					light = sp.light,
+				}
+			end
+
+			return specs
+		end,
+
+		-- [E] / SERPENT: "PREPARE THYSELF!" (2-Kick Sweep + Homing Serpent Throw)
+		onPrimary = function()
+			local STATE = Core.getState()
+			if not (STATE and STATE.alive) or STATE.isSettingUp then return end
+			local sa = STATE.custom.serpent
+			local now = os.clock()
+			if sa.kickPhase or (now - sa.lastUsed) < SERPENT_COOLDOWN then return end
+			local c = Core.getChar()
+			local hrp = c and c:FindFirstChild("HumanoidRootPart")
+			if not hrp then return end
+
+			sa.active = true
+			sa.kickPhase = true
+			sa.lastUsed = now
+			sa.startTime = now
+			sa.kickHit1 = false
+			sa.kickHit2 = false
+			sa.launched = false
+
+			Core.playSFX("PUNCH", 0.90, 0.95, "PARRY")
+		end,
+
+		-- [F] / JUDGEMENT: "JUDGEMENT!" (Parry-Flash Telegraph -> Teleport Dropkick Explosion)
+		onSecondary = function()
+			local STATE = Core.getState()
+			if not (STATE and STATE.alive) or STATE.isSettingUp then return end
+			local ja = STATE.custom.judgement
+			local now = os.clock()
+			if ja.active or (now - ja.lastUsed) < JUDGEMENT_COOLDOWN then return end
+			local c = Core.getChar()
+			local hrp = c and c:FindFirstChild("HumanoidRootPart")
+			if not hrp then return end
+
+			ja.active = true
+			ja.lastUsed = now
+			ja.startTime = now
+			ja.teleported = false
+			ja.exploded = false
+			ja.flashDone = false
+			ja.destCF = nil
+
+			-- High-tension gold parry glint telegraph
+			Core.playSFX("COIN_FLIP", 0.72, 1.0, "PARRY")
+			Core.spawnFlash(hrp.Position + V(0, 1.0, 0), PALETTE.JUDGEMENT_GOLD, 0.8, 3.6, 0.20)
+		end,
+
+		stepCharacter = function(_, c, hrp, hum, _, ctx)
+			local STATE = Core.getState()
+			local CONFIG = Core.getConfig()
+			local now = ctx.now
+			local inFP = ctx.inFP
+			local cam = ctx.cam
+			local isAir = ctx.isAir
+			local sinW, cosW = ctx.sinW, ctx.cosW
+
+			local t = STATE.time
+			local idleWeight = clamp(1 - STATE.walkBlend, 0, 1) * (1 - STATE.airBlend)
+			local realSoleDepth = (STATE.rigType == "R15") and (hum.HipHeight + hrp.Size.Y * 0.5) or 3.0
+			local groundOffsetY = MINOS_SOLE_DEPTH - realSoleDepth
+
+			local camPitch, camYawLocal = 0, 0
+			if CONFIG.ENABLE_HEAD_AIM_TRACKING and cam then
+				local camLocalLook = hrp.CFrame:VectorToObjectSpace(cam.CFrame.LookVector)
+				camPitch = clamp(math.asin(clamp(camLocalLook.Y, -0.85, 0.85)) * 180 / math.pi, -45, 55)
+				camYawLocal = clamp(math.atan2(-camLocalLook.X, -camLocalLook.Z) * 180 / math.pi, -35, 35)
+			end
+
+			-- Base Minos Prime Boxer Stance (hands raised, weight shifted, subtle heart pulse)
+			local torsoY = groundOffsetY + math.sin(t * 3.0) * 0.05 * idleWeight + math.abs(sinW) * 0.14 * STATE.walkBlend * (1 + STATE.sprintBlend * 0.4) - STATE.landRecover * 0.30
+			local idleYaw = 24 * idleWeight
+			local walkTwist = cosW * (7 + STATE.sprintBlend * 8) * STATE.walkBlend
+			local torsoPitch = -STATE.localFwd * (9 + STATE.sprintBlend * 12) + (STATE.landRecover * -14) + STATE.airBlend * clamp(-STATE.vertVel * 0.35, -14, 14)
+			local torsoRoll = -STATE.localStrafe * 10 - STATE.turnRate * 2.4
+			local torsoYaw = idleYaw + walkTwist
+
+			if STATE.slide.active and not isAir then
+				torsoY -= 1.35
+				torsoPitch = 36
+				torsoRoll = -STATE.localStrafe * 12
+				torsoYaw = 18
+			elseif STATE.slam.active and isAir then
+				-- "DIE!" Midair Rider Kick Pose
+				torsoPitch = -34
+				torsoRoll = -8
+				torsoYaw = -16
+			elseif STATE.isGliding and isAir then
+				torsoPitch -= 12
+			end
+
+			if STATE.dash.active then
+				local dK = 1 - clamp((now - STATE.dash.startTime) / math.max(0.01, CONFIG.DASH_DURATION), 0, 1)
+				local ld = STATE.dash.localDir
+				torsoPitch += ld.Z * 28 * dK
+				torsoRoll -= ld.X * 26 * dK
+			end
+
+			-- Default Boxer Guard Arms
+			local lUpperPitch = lerp(-12, 46, idleWeight) + sinW * (28 + STATE.sprintBlend * 18) * STATE.walkBlend
+			local lUpperYaw = -16 * idleWeight
+			local lUpperRoll = 12 + STATE.airBlend * 14
+			local lForePitch = lerp(30, 86, idleWeight) + math.max(0, sinW) * 20 * STATE.walkBlend
+
+			local rUpperPitch = lerp(-14, 38, idleWeight) - sinW * (28 + STATE.sprintBlend * 18) * STATE.walkBlend
+			local rUpperYaw = 14 * idleWeight
+			local rUpperRoll = -12 - STATE.airBlend * 14
+			local rForePitch = lerp(28, 78, idleWeight) + math.max(0, -sinW) * 20 * STATE.walkBlend
+
+			-- Default Legs
+			local lThighP, rThighP = 12 * idleWeight, -14 * idleWeight
+			local lShinP, rShinP = -18 * idleWeight, -12 * idleWeight
+			local lFootP, rFootP = 6 * idleWeight, 22 * idleWeight
+
+			if STATE.walkBlend > 0.01 then
+				local stride = 38 + STATE.sprintBlend * 22
+				lThighP = lerp(lThighP, sinW * stride, STATE.walkBlend)
+				rThighP = lerp(rThighP, -sinW * stride, STATE.walkBlend)
+				lShinP = lerp(lShinP, -math.max(0, -cosW) * (48 + STATE.sprintBlend * 22) - 8, STATE.walkBlend)
+				rShinP = lerp(rShinP, -math.max(0, cosW) * (48 + STATE.sprintBlend * 22) - 8, STATE.walkBlend)
+				lFootP = lerp(lFootP, cosW * 16, STATE.walkBlend)
+				rFootP = lerp(rFootP, -cosW * 16, STATE.walkBlend)
+			end
+
+			if STATE.airBlend > 0.01 then
+				local airTuckL, airTuckR = 24, 46
+				local shinTuckL, shinTuckR = -36, -70
+				if STATE.slam.active then
+					-- Rider Kick ("DIE!") leg silhouette
+					airTuckL, airTuckR = 72, -16
+					shinTuckL, shinTuckR = -105, -8
+					lUpperPitch, lUpperRoll, lForePitch = -24, 38, 22
+					rUpperPitch, rUpperRoll, rForePitch = 56, -12, 48
+				elseif STATE.isGliding then
+					airTuckL, airTuckR = 14, 28
+					shinTuckL, shinTuckR = -24, -48
+				end
+				lThighP = lerp(lThighP, airTuckL, STATE.airBlend)
+				rThighP = lerp(rThighP, airTuckR, STATE.airBlend)
+				lShinP = lerp(lShinP, shinTuckL, STATE.airBlend)
+				rShinP = lerp(rShinP, shinTuckR, STATE.airBlend)
+			end
+
+			if STATE.slide.active and not isAir then
+				lThighP, rThighP = 68, -22
+				lShinP, rShinP = -12, -74
+				lFootP, rFootP = -24, 18
+			end
+
+			-- Track Slam Impact for "CRUSH!" shockwave
+			if STATE.wasSlamming and not STATE.slam.active and not isAir then
+				Core.playSFX("PARRY", 0.72, 0.92)
+				Core.spawnRing(hrp.Position - V(0, 2.2, 0), PALETTE.PRIME_CYAN, 1.6, 12.5, 0.34)
+				Core.spawnFlash(hrp.Position - V(0, 2.0, 0), PALETTE.PRIME_CYAN, 1.2, 6.8, 0.25)
+				Core.addStyleBonus("+CRUSH", 150, PALETTE.PRIME_CYAN)
+				STATE.camShake = math.max(STATE.camShake, 0.65)
+				for _, hit in ipairs(findTargetsInRadius(c, hrp.Position, 13.5)) do
+					Core.applyF3XKnockback(hit.char, hit.hrp.Position - hrp.Position, CRUSH_KNOCKBACK)
+				end
+			end
+			STATE.wasSlamming = STATE.slam.active
+
+			-------------------------------------------------------------------
+			-- MOVE 1: LMB BOXING COMBO ("THY END IS NOW!" / UPPERCUT)
+			-------------------------------------------------------------------
+			local cb = STATE.custom.combo
+			if cb.active then
+				local cEl = now - cb.startTime
+				local dur = (cb.step == 4) and 0.42 or 0.26
+				if cEl < dur then
+					if cb.uppercut then
+						local k = easeOutBack(clamp(cEl / 0.16, 0, 1))
+						torsoPitch = lerp(torsoPitch, -18, k)
+						torsoYaw = lerp(torsoYaw, -28, k)
+						rUpperPitch = lerp(rUpperPitch, 138, k)
+						rUpperYaw = lerp(rUpperYaw, -12, k)
+						rForePitch = lerp(rForePitch, 22, k)
+					elseif cb.step == 1 then
+						-- Left Jab
+						local k = easeOutBack(clamp(cEl / 0.12, 0, 1))
+						torsoYaw = lerp(torsoYaw, -36, k)
+						lUpperPitch = lerp(lUpperPitch, 94 + camPitch * 0.6, k)
+						lUpperYaw = lerp(lUpperYaw, -18, k)
+						lForePitch = lerp(lForePitch, 8, k)
+					elseif cb.step == 2 then
+						-- Right Cross
+						local k = easeOutBack(clamp(cEl / 0.12, 0, 1))
+						torsoYaw = lerp(torsoYaw, 38, k)
+						rUpperPitch = lerp(rUpperPitch, 96 + camPitch * 0.6, k)
+						rUpperYaw = lerp(rUpperYaw, 18, k)
+						rForePitch = lerp(rForePitch, 8, k)
+					elseif cb.step == 3 then
+						-- Left Hook
+						local k = easeOutBack(clamp(cEl / 0.13, 0, 1))
+						torsoYaw = lerp(torsoYaw, -52, k)
+						lUpperPitch = lerp(lUpperPitch, 84, k)
+						lUpperYaw = lerp(lUpperYaw, -54, k)
+						lForePitch = lerp(lForePitch, 68, k)
+					else
+						-- Step 4 Finisher Overhead Slam
+						local k = easeOutQuad(clamp(cEl / 0.18, 0, 1))
+						torsoY -= 0.42 * k
+						torsoPitch = lerp(torsoPitch, 32, k)
+						rUpperPitch = lerp(rUpperPitch, 56, k)
+						lUpperPitch = lerp(lUpperPitch, 56, k)
+						rForePitch = lerp(rForePitch, 14, k)
+						lForePitch = lerp(lForePitch, 14, k)
+					end
+
+					if not cb.hitDone and cEl >= 0.06 then
+						cb.hitDone = true
+						-- Forward micro-step on punch
+						hrp.AssemblyLinearVelocity = hrp.AssemblyLinearVelocity + hrp.CFrame.LookVector * (cb.step == 4 and 24 or 14)
+						local tChar, tHRP = findNearestTarget(c, hrp.Position, COMBO_RANGE, hrp.CFrame.LookVector)
+						if tChar and tHRP then
+							local isFinisher = (cb.step == 4)
+							Core.playSFX("PARRY", isFinisher and 0.85 or 1.05, 0.9)
+							Core.triggerHitstop(isFinisher and 0.09 or 0.05, PALETTE.PRIME_CYAN)
+							Core.spawnFlash(tHRP.Position, isFinisher and PALETTE.JUDGEMENT_GOLD or PALETTE.PRIME_CYAN, 0.9, isFinisher and 5.5 or 3.8, 0.22)
+							if isFinisher or cb.uppercut then
+								Core.spawnRing(tHRP.Position, PALETTE.PRIME_CYAN, 1.0, 6.2, 0.24)
+							end
+							local kb = cb.uppercut and UPPERCUT_KNOCKBACK or (isFinisher and FINISHER_KNOCKBACK or PUNCH_KNOCKBACK)
+							Core.applyF3XKnockback(tChar, tHRP.Position - hrp.Position, kb)
+							Core.addStyleBonus(cb.uppercut and "+UPPERCUT" or (isFinisher and "+THY END IS NOW" or "+PRIME PUNCH"), isFinisher and 175 or 75, PALETTE.PRIME_CYAN)
+						end
+					end
+				else
+					cb.active = false
+				end
+			end
+
+			-------------------------------------------------------------------
+			-- MOVE 2: [E] SERPENT ("PREPARE THYSELF!" 2-KICK + HOMING SERPENT)
+			-------------------------------------------------------------------
+			local sa = STATE.custom.serpent
+			if sa.kickPhase then
+				local sEl = now - sa.startTime
+				if sEl < 0.18 then
+					-- Kick 1: Right Roundhouse Sweep
+					local k = easeOutBack(clamp(sEl / 0.14, 0, 1))
+					torsoPitch = lerp(torsoPitch, -24, k)
+					torsoYaw = lerp(torsoYaw, -48, k)
+					rThighP = lerp(rThighP, 88, k)
+					rShinP = lerp(rShinP, -10, k)
+					lUpperPitch, rUpperPitch = lerp(lUpperPitch, -24, k), lerp(rUpperPitch, 48, k)
+
+					if not sa.kickHit1 and sEl >= 0.07 then
+						sa.kickHit1 = true
+						local tChar, tHRP = findNearestTarget(c, hrp.Position, COMBO_RANGE + 1.5, hrp.CFrame.LookVector)
+						if tChar and tHRP then
+							Core.playSFX("PARRY", 1.02, 0.9)
+							Core.spawnFlash(tHRP.Position, PALETTE.PRIME_CYAN, 0.9, 4.2, 0.20)
+							Core.applyF3XKnockback(tChar, tHRP.Position - hrp.Position, PUNCH_KNOCKBACK)
+						end
+					end
+				elseif sEl < 0.36 then
+					-- Kick 2: Left High Kick + Forearm Serpent Launch Pose
+					local k = easeOutBack(clamp((sEl - 0.18) / 0.14, 0, 1))
+					torsoPitch = lerp(torsoPitch, -26, k)
+					torsoYaw = lerp(torsoYaw, 46, k)
+					lThighP = lerp(lThighP, 94, k)
+					lShinP = lerp(lShinP, -8, k)
+					rUpperPitch = lerp(rUpperPitch, 96 + camPitch * 0.7, k)
+					rForePitch = lerp(rForePitch, 8, k)
+
+					if not sa.kickHit2 and sEl >= 0.22 then
+						sa.kickHit2 = true
+						Core.playSFX("PUNCH", 0.96, 0.95, "PARRY")
+						local tChar, tHRP = findNearestTarget(c, hrp.Position, COMBO_RANGE + 1.5, hrp.CFrame.LookVector)
+						if tChar and tHRP then
+							Core.playSFX("PARRY", 1.06, 0.95)
+							Core.spawnFlash(tHRP.Position, PALETTE.SERPENT_GOLD, 1.0, 4.6, 0.22)
+							Core.applyF3XKnockback(tChar, tHRP.Position - hrp.Position, PUNCH_KNOCKBACK)
+						end
+					end
+
+					if not sa.launched and sEl >= 0.26 then
+						sa.launched = true
+						sa.projectileActive = true
+						local launchPos = (hrp.CFrame * C(1.2, 0.8, -2.4)).Position
+						local aimTargetPos = getLookAimPos(cam, hrp, SERPENT_RANGE)
+						local tChar, tHRP = findNearestTarget(c, launchPos, SERPENT_RANGE, nil)
+						local dir = ((tHRP and tHRP.Position or aimTargetPos) - launchPos)
+						dir = (dir.Magnitude > 0.1) and dir.Unit or hrp.CFrame.LookVector
+						sa.originPos = launchPos
+						sa.pos = launchPos
+						sa.vel = dir * SERPENT_SPEED
+						sa.targetChar = tChar
+						sa.cf = C(sa.pos, sa.pos + dir)
+						Core.playSFX("COIN_FLIP", 0.88, 1.0, "PARRY")
+						Core.spawnRing(launchPos, PALETTE.SERPENT_GOLD, 0.7, 3.8, 0.20)
+					end
+				else
+					sa.kickPhase = false
+				end
+			end
+
+			-- Update Homing Golden Serpent Projectile
+			if sa.projectileActive then
+				local pEl = now - sa.startTime
+				local dtStep = 1 / 60
+
+				local targetHRP = sa.targetChar and Core.getTargetRoot(sa.targetChar)
+				if not targetHRP then
+					local newChar, newHRP = findNearestTarget(c, sa.pos, 55, nil)
+					sa.targetChar = newChar
+					targetHRP = newHRP
+				end
+
+				if targetHRP and targetHRP:IsA("BasePart") then
+					local desired = (targetHRP.Position - sa.pos)
+					if desired.Magnitude > 0.1 then
+						local curDir = sa.vel.Unit
+						local newDir = curDir:Lerp(desired.Unit, 0.11).Unit
+						sa.vel = newDir * SERPENT_SPEED
+					end
+				end
+
+				sa.pos = sa.pos + sa.vel * dtStep
+				sa.cf = C(sa.pos, sa.pos + sa.vel) * angles(0, 0, pEl * 540)
+
+				local hitDetected = false
+				local hitPos = sa.pos
+				local hitChar = nil
+				for _, hit in ipairs(findTargetsInRadius(c, sa.pos, 6.0)) do
+					hitDetected = true
+					hitPos = hit.hrp.Position
+					hitChar = hit.char
+					break
+				end
+
+				if hitDetected or pEl >= 1.65 then
+					sa.projectileActive = false
+					sa.active = false
+					sa.cf = PARK_CF
+					Core.playSFX("SHATTER", 0.94, 1.0, "PARRY")
+					Core.spawnRing(hitPos, PALETTE.SERPENT_GOLD, 1.1, 8.5, 0.28)
+					Core.spawnFlash(hitPos, PALETTE.SERPENT_GOLD, 1.3, 6.4, 0.24)
+					if hitChar then
+						Core.playSFX("PARRY", 1.10, 0.9)
+						Core.triggerHitstop(0.08, PALETTE.SERPENT_GOLD)
+						Core.fireDualBeams(sa.originPos, (sa.originPos + hitPos) * 0.5 + V(0, 2, 0), hitPos, PALETTE.PRIME_CYAN, PALETTE.SERPENT_GOLD, 0.18, 0.42, true, 0.22)
+						Core.addStyleBonus("+PREPARE THYSELF", 180, PALETTE.SERPENT_GOLD)
+						Core.applyF3XKnockback(hitChar, sa.vel, SERPENT_KNOCKBACK)
+					end
+				end
+			else
+				sa.cf = PARK_CF
+			end
+
+			if STATE.buckets.minosSerpent then
+				local parentCF = sa.projectileActive and sa.cf or PARK_CF
+				for _, e in ipairs(STATE.buckets.minosSerpent) do
+					e.targetCF = (parentCF == PARK_CF) and PARK_CF or (parentCF * e.relCF)
+					e.part.CFrame = e.targetCF
+				end
+			end
+
+			-------------------------------------------------------------------
+			-- MOVE 3: [F] JUDGEMENT ("JUDGEMENT!" TELEPORT DROPKICK + EXPLOSION)
+			-------------------------------------------------------------------
+			local ja = STATE.custom.judgement
+			if ja.active then
+				local jEl = now - ja.startTime
+				if jEl < 0.22 then
+					-- Telegraph Crouch + Gold Parry Flash
+					local k = easeOutQuad(jEl / 0.22)
+					torsoY -= 0.78 * k
+					torsoPitch = lerp(torsoPitch, 38, k)
+					lThighP, rThighP = lerp(lThighP, 62, k), lerp(rThighP, 58, k)
+					lShinP, rShinP = lerp(lShinP, -96, k), lerp(rShinP, -92, k)
+					lUpperPitch, rUpperPitch = lerp(lUpperPitch, -48, k), lerp(rUpperPitch, -48, k)
+					lUpperRoll, rUpperRoll = 26, -26
+					if not ja.flashDone and jEl >= 0.10 then
+						ja.flashDone = true
+						Core.spawnRing(hrp.Position, PALETTE.JUDGEMENT_GOLD, 0.8, 5.2, 0.18)
+					end
+				elseif jEl < 0.50 then
+					-- Teleport Dropkick Strike
+					if not ja.teleported then
+						ja.teleported = true
+						local originPos = hrp.Position
+						local tChar, tHRP = findNearestTarget(c, originPos, JUDGEMENT_RANGE, nil)
+						local destPos
+						local faceDir
+						if tHRP then
+							local toTarget = (tHRP.Position - originPos)
+							local flatDir = V(toTarget.X, 0, toTarget.Z)
+							faceDir = (flatDir.Magnitude > 0.1) and flatDir.Unit or hrp.CFrame.LookVector
+							destPos = tHRP.Position - faceDir * 4.2 + V(0, 1.2, 0)
+						else
+							local look = cam and cam.CFrame.LookVector or hrp.CFrame.LookVector
+							faceDir = V(look.X, 0, look.Z)
+							faceDir = (faceDir.Magnitude > 0.1) and faceDir.Unit or hrp.CFrame.LookVector
+							destPos = originPos + faceDir * 36 + V(0, 1.0, 0)
+						end
+
+						hrp.AssemblyLinearVelocity = Vector3.zero
+						hrp.CFrame = C(destPos, destPos + faceDir)
+						Core.fireDualBeams(originPos, (originPos + destPos) * 0.5 + V(0, 1.5, 0), destPos, PALETTE.PRIME_CYAN, PALETTE.JUDGEMENT_GOLD, 0.28, 0.36, true, 0.24)
+					end
+
+					-- Full horizontal Dropkick Pose
+					local k = easeOutBack(clamp((jEl - 0.22) / 0.10, 0, 1))
+					torsoY += 0.35 * k
+					torsoPitch = lerp(torsoPitch, -58, k)
+					torsoYaw = 0
+					lThighP, rThighP = lerp(lThighP, 82, k), lerp(rThighP, 88, k)
+					lShinP, rShinP = lerp(lShinP, -6, k), lerp(rShinP, -4, k)
+					lUpperPitch, rUpperPitch = lerp(lUpperPitch, -38, k), lerp(rUpperPitch, -38, k)
+					lUpperRoll, rUpperRoll = 36, -36
+
+					if not ja.exploded and jEl >= 0.25 then
+						ja.exploded = true
+						local blastPos = (hrp.CFrame * C(0, 0, -2.5)).Position
+						Core.playSFX("PARRY", 0.80, 1.0)
+						Core.playSFX("SHATTER", 0.76, 1.0, "PARRY")
+						Core.triggerHitstop(0.11, PALETTE.JUDGEMENT_GOLD)
+						Core.spawnRing(blastPos, PALETTE.JUDGEMENT_GOLD, 1.8, 14.0, 0.34)
+						Core.spawnRing(blastPos + V(0, 0.4, 0), PALETTE.PRIME_CYAN, 1.2, 10.5, 0.28)
+						Core.spawnFlash(blastPos, PALETTE.JUDGEMENT_GOLD, 1.6, 8.2, 0.28)
+						STATE.camShake = math.max(STATE.camShake, 0.85)
+						STATE.fovKick = math.max(STATE.fovKick, 12)
+
+						local hits = findTargetsInRadius(c, blastPos, 13.5)
+						if #hits > 0 then
+							Core.addStyleBonus("+JUDGEMENT", 260, PALETTE.JUDGEMENT_GOLD)
+							for _, hit in ipairs(hits) do
+								Core.applyF3XKnockback(hit.char, hit.hrp.Position - hrp.Position + hrp.CFrame.LookVector * 3, JUDGEMENT_KNOCKBACK)
+							end
+						else
+							Core.addStyleBonus("+JUDGEMENT", 120, PALETTE.PRIME_CYAN)
+						end
+					end
+				else
+					ja.active = false
+				end
+			end
+
+			-------------------------------------------------------------------
+			-- BUILD FINAL CFRAMES & APPLY TO BUCKETS
+			-------------------------------------------------------------------
+			local torsoCF = hrp.CFrame * C(0, torsoY, 0) * angles(torsoPitch, torsoYaw, torsoRoll)
+			local chestCF = torsoCF * C(0, MINOS_CHEST_OFFSET, 0)
+			local abdomenCF = torsoCF * C(0, MINOS_ABDOMEN_OFFSET, 0)
+			local pelvisCF = torsoCF * C(0, MINOS_PELVIS_OFFSET, 0)
+
+			local headPitch = camPitch * 0.85 - torsoPitch * 0.45 + math.sin(t * 3.0 + 0.5) * 2.5 * idleWeight
+			local headYaw = camYawLocal * 0.75 - torsoYaw * 0.35
+			local headCF = chestCF * C(0, 1.06, -0.04) * angles(headPitch, headYaw, -torsoRoll * 0.4)
+
+			local shoulderL = chestCF * C(-1.06, 0.24, 0)
+			local shoulderR = chestCF * C(1.06, 0.24, 0)
+			if STATE.fpArms and cam then
+				shoulderL = cam.CFrame * C(-1.05, -0.78, -0.82) * angles(-camPitch * 0.2, 0, 0)
+				shoulderR = cam.CFrame * C(1.02, -0.78, -0.85) * angles(-camPitch * 0.2, 0, 0)
+			end
+
+			local lUpperCF = shoulderL * angles(lUpperPitch, lUpperYaw, lUpperRoll)
+			local lForeCF = lUpperCF * C(0, -MINOS_UPPER_ARM_LEN, 0) * angles(lForePitch, 0, 0)
+			local lHandCF = lForeCF * C(0, -MINOS_FOREARM_LEN, 0)
+
+			local rUpperCF = shoulderR * angles(rUpperPitch, rUpperYaw, rUpperRoll)
+			local rForeCF = rUpperCF * C(0, -MINOS_UPPER_ARM_LEN, 0) * angles(rForePitch, 0, 0)
+			local rHandCF = rForeCF * C(0, -MINOS_FOREARM_LEN, 0)
+
+			local hipL = pelvisCF * C(-0.46, MINOS_HIP_Y, 0)
+			local hipR = pelvisCF * C(0.46, MINOS_HIP_Y, 0)
+			local lThighCF = hipL * angles(lThighP, 8 * idleWeight, -4)
+			local rThighCF = hipR * angles(rThighP, -6 * idleWeight, 4)
+			local lShinCF = lThighCF * C(0, -MINOS_THIGH_LEN, 0) * angles(lShinP, 0, 0)
+			local rShinCF = rThighCF * C(0, -MINOS_THIGH_LEN, 0) * angles(rShinP, 0, 0)
+			local lFootCF = lShinCF * C(0, -MINOS_SHIN_LEN, 0) * angles(lFootP, 0, 0)
+			local rFootCF = rShinCF * C(0, -MINOS_SHIN_LEN, 0) * angles(rFootP, 0, 0)
+
+			local function applyBucket(bucketName, parentMap, hideInFP)
+				local list = STATE.buckets[bucketName]
+				if not list then return end
+				for _, e in ipairs(list) do
+					local baseCF = e.key and parentMap[e.key] or parentMap
+					if baseCF then
+						e.targetCF = baseCF * e.relCF
+						e.part.CFrame = e.targetCF
+						e.part.LocalTransparencyModifier = (hideInFP and inFP) and 1 or 0
+					end
+				end
+			end
+
+			applyBucket("minosHead", headCF, true)
+			applyBucket("minosBody", { chest = chestCF, abdomen = abdomenCF, pelvis = pelvisCF }, true)
+			applyBucket("minosUpperArm", { lUpperArm = lUpperCF, rUpperArm = rUpperCF }, not STATE.fpArms)
+			applyBucket("minosForearm", { lForearm = lForeCF, rForearm = rForeCF }, not STATE.fpArms)
+			applyBucket("minosHand", { lHand = lHandCF, rHand = rHandCF }, not STATE.fpArms)
+			applyBucket("minosThigh", { lThigh = lThighCF, rThigh = rThighCF }, true)
+			applyBucket("minosShin", { lShin = lShinCF, rShin = rShinCF }, true)
+			applyBucket("minosFoot", { lFoot = lFootCF, rFoot = rFootCF }, true)
+
+			local judgeCharge = clamp((now - ja.lastUsed) / JUDGEMENT_COOLDOWN, 0, 1)
+			local serpentCharge = clamp((now - sa.lastUsed) / SERPENT_COOLDOWN, 0, 1)
+			local hudCharge = math.min(judgeCharge, serpentCharge)
+
+			local titleText = "JUDGEMENT // SERPENT"
+			local titleColor = PALETTE.PRIME_CYAN
+			if ja.active then
+				titleText = "!! JUDGEMENT !!"
+				titleColor = PALETTE.JUDGEMENT_GOLD
+			elseif sa.active then
+				titleText = "PREPARE THYSELF!"
+				titleColor = PALETTE.SERPENT_GOLD
+			elseif cb.active then
+				titleText = cb.uppercut and "UPPERCUT!" or "THY END IS NOW!"
+				titleColor = PALETTE.PRIME_CYAN
+			end
+
+			local hudStatus = {
+				weaponTitle = titleText,
+				weaponColor = titleColor,
+				chargeFrac = hudCharge,
+				pipColor = PALETTE.SERPENT_GOLD,
+				pipDimColor = Color3.fromRGB(115, 95, 30),
+			}
+
+			local cfs = {
+				["Head"] = headCF,
+				["Torso"] = torsoCF,
+				["Left Arm"] = lForeCF,
+				["Right Arm"] = rForeCF,
+				["Left Leg"] = lShinCF,
+				["Right Leg"] = rShinCF,
+			}
+
+			return hudStatus, cfs
+		end,
+	})
 end
