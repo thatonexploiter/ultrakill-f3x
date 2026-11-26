@@ -135,6 +135,13 @@ local DEFAULT_CONFIG = {
 
 	ENABLE_HEAD_AIM_TRACKING = true,
 	FOOTSTEP_SFX = true,
+	ENABLE_BGM = true,
+	BGM_URL = "",
+	BGM_FILE = "ultrakill_bgm.mp3",
+	BGM_FALLBACK_ID = "",
+	BGM_VOLUME = 0.40,
+	BGM_PITCH = 1.0,
+	BGM_MUTED = false,
 	ENABLE_HUD = true,
 
 	HUD_UNIT_HEADER = "V1 // BLOOD FUEL SYSTEM",
@@ -436,6 +443,81 @@ local function playSFX(key, pitchOverride, volumeScale, fallbackKey)
 end
 
 Core.playSFX = playSFX
+
+local activeBGM = nil
+local getAssetFn = getcustomasset or getsynasset
+
+local function stopBGM()
+	if activeBGM then
+		pcall(function()
+			activeBGM:Stop()
+			activeBGM:Destroy()
+		end)
+		activeBGM = nil
+	end
+end
+
+local function loadCustomAudioAsset(url, fileName, fallbackId)
+	if url and url ~= "" and getAssetFn and writefile and isfile then
+		local folder = "ultrakill_f3x_audio"
+		if makefolder and isfolder and not isfolder(folder) then
+			pcall(makefolder, folder)
+		end
+		local path = folder .. "/" .. (fileName or "bgm.mp3")
+
+		if not isfile(path) then
+			local ok, raw = pcall(function()
+				return game:HttpGet(url, true)
+			end)
+			if ok and type(raw) == "string" and #raw > 1024 then
+				pcall(writefile, path, raw)
+			end
+		end
+
+		if isfile(path) then
+			local okAsset, assetId = pcall(getAssetFn, path)
+			if okAsset and type(assetId) == "string" and assetId ~= "" then
+				return assetId
+			end
+		end
+	end
+	return fallbackId
+end
+
+local function startBGM(url, fileName, fallbackId, vol, pitch)
+	stopBGM()
+	if not CONFIG.ENABLE_BGM then return end
+
+	task.spawn(function()
+		local soundId = loadCustomAudioAsset(url, fileName, fallbackId)
+		if not soundId or soundId == "" or not STATE.alive then return end
+
+		local snd = Instance.new("Sound")
+		snd.Name = "F3X_Ultrakill_BGM"
+		snd.SoundId = soundId
+		snd.Looped = true
+		snd.Volume = CONFIG.BGM_MUTED and 0 or (vol or CONFIG.BGM_VOLUME or 0.40)
+		snd.PlaybackSpeed = pitch or CONFIG.BGM_PITCH or 1.0
+		snd.Parent = SoundService
+		activeBGM = snd
+
+		pcall(function() ContentProvider:PreloadAsync({ snd }) end)
+		if activeBGM == snd and STATE.alive then
+			snd:Play()
+		end
+	end)
+end
+
+local function toggleBGMMute()
+	CONFIG.BGM_MUTED = not CONFIG.BGM_MUTED
+	if activeBGM then
+		activeBGM.Volume = CONFIG.BGM_MUTED and 0 or (CONFIG.BGM_VOLUME or 0.40)
+	end
+end
+
+Core.startBGM = startBGM
+Core.stopBGM = stopBGM
+Core.toggleBGMMute = toggleBGMMute
 
 -------------------------------------------------------------------
 -- HUD 3D DE VISOR + CONTROLES MOBILE NA FORMAÇÃO ORIGINAL
@@ -2868,6 +2950,7 @@ setupRig = function()
 		end
 
 		if CHAR_DEF.onSetupComplete then CHAR_DEF.onSetupComplete(Core) end
+				startBGM(CONFIG.BGM_URL, CONFIG.BGM_FILE, CONFIG.BGM_FALLBACK_ID, CONFIG.BGM_VOLUME, CONFIG.BGM_PITCH)
 		print(string.format("[F3X Ultrakill - %s] Ready (%s): %d/%d parts | KB+Seat+Ram=%s",
 			tostring(CHAR_DEF.name or CHAR_DEF.id), STATE.rigType, #STATE.proxyParts, #specs, tostring(STATE.seatPart ~= nil and STATE.ramPart ~= nil)))
 
@@ -2931,6 +3014,7 @@ cleanup = function()
 	local cam = workspace.CurrentCamera
 	if cam then pcall(function() cam.FieldOfView = CONFIG.BASE_FOV end) end
 	destroySounds()
+	stopBGM()
 	destroyHUD()
 	if oldState.hitstopCC then
 		pcall(function() oldState.hitstopCC:Destroy() end)
@@ -3379,6 +3463,9 @@ function Core.start(charDef)
 			if CHAR_DEF and CHAR_DEF.onSecondary then CHAR_DEF.onSecondary(Core) end
 		elseif inp.KeyCode == Enum.KeyCode.R then
 			if CHAR_DEF and CHAR_DEF.onTertiary then CHAR_DEF.onTertiary(Core) end
+		elseif inp.KeyCode == Enum.KeyCode.M then
+			toggleBGMMute()
+			return
 		elseif inp.KeyCode == Enum.KeyCode.X then
 			STATE.fpHideArms = not STATE.fpHideArms
 			local hint = STATE.hud.hint
@@ -3386,6 +3473,7 @@ function Core.start(charDef)
 				hint.Text = STATE.fpHideArms and "[X] 1P ARMS: OFF" or "[X] 1P ARMS: ON"
 				hint.TextColor3 = STATE.fpHideArms and CONFIG.BEAM_CYAN or CONFIG.HUD_WEAPON_COLOR
 			end
+			return
 		end
 	end))
 
