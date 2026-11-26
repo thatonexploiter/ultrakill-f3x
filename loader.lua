@@ -497,19 +497,33 @@ table.insert(connections, minBtn.MouseButton1Click:Connect(function()
 	minBtn.Text = isMinimized and "+" or "-"
 end))
 
-table.insert(connections, resyncBtn.MouseButton1Click:Connect(function()
+local function handleResync()
 	if triggerRebuild() then
 		setStatus("RE-SYNC // Rebuilding current rig...", Color3.fromRGB(115, 220, 255))
 	else
 		setStatus("WARN // No active character to re-sync.", Color3.fromRGB(255, 205, 65))
 	end
-end))
+end
 
-table.insert(connections, stopBtn.MouseButton1Click:Connect(function()
+local function handleStop()
 	cleanupActiveRig()
 	refreshCardHighlights()
 	setStatus("STOPPED // Rig removed and character restored.", Color3.fromRGB(255, 130, 130))
+end
+
+table.insert(connections, resyncBtn.MouseButton1Click:Connect(handleResync))
+table.insert(connections, stopBtn.MouseButton1Click:Connect(handleStop))
+
+table.insert(connections, UIS.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+
+	if input.KeyCode == Enum.KeyCode.F7 then
+		handleResync()
+	elseif input.KeyCode == Enum.KeyCode.F6 then
+		handleStop()
+	end
 end))
+
 
 local function destroyLoader()
 	for _, conn in ipairs(connections) do
