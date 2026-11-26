@@ -8,6 +8,7 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
+local env = (getgenv and getgenv()) or _G
 local BASE_URL = "https://raw.githubusercontent.com/thatonexploiter/ultrakill-f3x/main/"
 
 -- ============================================================================
@@ -34,7 +35,7 @@ local TIPS = {
 	"TIP OF THE DAY: F3X PARTS MUST STAY ANCHORED & NON-COLLIDABLE TO PREVENT FLINGING.",
 	"TIP OF THE DAY: THROW A COIN AND SHOOT IT FOR AN INSTANT RICOCHET.",
 	"TIP OF THE DAY: MANKIND IS DEAD. BLOOD IS FUEL. HELL IS FULL.",
-	"TIP OF THE DAY: USE [REBUILD RIG] IF YOUR CHARACTER RESPAWNS OR DESYNCS.",
+	"TIP OF THE DAY: USE [ REBUILD ] IF YOUR CHARACTER RESPAWNS OR DESYNCS.",
 }
 
 -- ============================================================================
@@ -76,7 +77,7 @@ local CHARACTERS = {
 }
 
 -- ============================================================================
--- GLOBAL CONTROLLER & CLEANUP
+-- GLOBAL CONTROLLER & CLEANUP HOOKS (matches core.lua env)
 -- ============================================================================
 local LEGACY_CLEANUP_GLOBALS = {
 	"F3XV1ReanimCleanup",
@@ -107,7 +108,6 @@ local function getGuiParent()
 	return LocalPlayer:WaitForChild("PlayerGui")
 end
 
--- Destroy previous loader instance if re-executed
 local guiParent = getGuiParent()
 local existing = guiParent:FindFirstChild("ULTRAKILL_F3X_TERMINAL")
 if existing then
@@ -132,7 +132,6 @@ local function addStroke(parent, color, thickness)
 	return s
 end
 
--- Main Terminal Frame
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "TerminalWindow"
 MainFrame.Size = UDim2.fromOffset(540, 380)
@@ -143,7 +142,6 @@ MainFrame.Active = true
 MainFrame.Parent = ScreenGui
 addStroke(MainFrame, THEME.BorderWhite, 2)
 
--- SmileOS 2.0 Top Title Bar
 local TitleBar = Instance.new("Frame")
 TitleBar.Name = "TitleBar"
 TitleBar.Size = UDim2.new(1, 0, 0, 28)
@@ -169,7 +167,6 @@ TitleText.TextXAlignment = Enum.TextXAlignment.Left
 TitleText.Text = "SmileOS 2.0  //  ULTRAKILL_F3X.EXE"
 TitleText.Parent = TitleBar
 
--- Window Buttons: [-] and [X]
 local MinBtn = Instance.new("TextButton")
 MinBtn.Size = UDim2.fromOffset(26, 22)
 MinBtn.Position = UDim2.new(1, -56, 0, 3)
@@ -194,7 +191,6 @@ CloseBtn.Text = "X"
 CloseBtn.Parent = TitleBar
 addStroke(CloseBtn, THEME.BorderWhite, 1)
 
--- Body Container (hidden when minimized)
 local Body = Instance.new("Frame")
 Body.Name = "Body"
 Body.Size = UDim2.new(1, 0, 1, -28)
@@ -236,7 +232,7 @@ local SideLayout = Instance.new("UIListLayout")
 SideLayout.Padding = UDim.new(0, 5)
 SideLayout.Parent = SideList
 
--- Right Main Panel: --TERMINAL DATA--
+-- Right Main Panel
 local ContentPanel = Instance.new("Frame")
 ContentPanel.Size = UDim2.new(1, -195, 1, -42)
 ContentPanel.Position = UDim2.fromOffset(185, 10)
@@ -280,7 +276,6 @@ SelectedDesc.TextWrapped = true
 SelectedDesc.Text = ""
 SelectedDesc.Parent = ContentPanel
 
--- Action Buttons Row
 local ActionRow = Instance.new("Frame")
 ActionRow.Size = UDim2.new(1, -16, 0, 34)
 ActionRow.Position = UDim2.fromOffset(8, 108)
@@ -316,7 +311,6 @@ local DeployBtn = makeTerminalButton("[ DEPLOY ]", UDim2.new(0.38, -4, 1, 0), UD
 local RebuildBtn = makeTerminalButton("[ REBUILD ]", UDim2.new(0.32, -4, 1, 0), UDim2.new(0.38, 2, 0, 0), THEME.AccentGold)
 local UnloadBtn = makeTerminalButton("[ UNLOAD ]", UDim2.new(0.30, 0, 1, 0), UDim2.new(0.70, 4, 0, 0), THEME.TextMuted)
 
--- Console / Verification Log Box
 local LogHeader = Instance.new("TextLabel")
 LogHeader.Size = UDim2.new(1, -16, 0, 18)
 LogHeader.Position = UDim2.fromOffset(8, 150)
@@ -350,7 +344,6 @@ LogPad.PaddingLeft = UDim.new(0, 6)
 LogPad.PaddingRight = UDim.new(0, 6)
 LogPad.Parent = LogBox
 
--- Bottom Tip of the Day Footer
 local TipBar = Instance.new("TextLabel")
 TipBar.Size = UDim2.new(1, -20, 0, 22)
 TipBar.Position = UDim2.new(0, 10, 1, -26)
@@ -366,7 +359,7 @@ TipBar.Parent = Body
 addStroke(TipBar, THEME.BorderDim, 1)
 
 -- ============================================================================
--- LOGGING & VERIFICATION HELPERS
+-- LOGGING
 -- ============================================================================
 local function logLine(msg, color)
 	local lbl = Instance.new("TextLabel")
@@ -381,7 +374,6 @@ local function logLine(msg, color)
 	lbl.Text = "> " .. tostring(msg)
 	lbl.Parent = LogBox
 
-	-- Auto-scroll to bottom
 	task.defer(function()
 		LogBox.CanvasPosition = Vector2.new(0, LogBox.AbsoluteCanvasSize.Y)
 	end)
@@ -424,7 +416,7 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 local minimized = false
-MinBtn.MouseButton1Click:Connect(function()
+MinBtn.Activated:Connect(function()
 	minimized = not minimized
 	Body.Visible = not minimized
 	MainFrame.Size = minimized and UDim2.fromOffset(540, 28) or UDim2.fromOffset(540, 380)
@@ -432,11 +424,21 @@ MinBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================================
--- LOADER ENGINE (HTTP, COMPILE, CLEANUP, REBUILD)
+-- LOADER ENGINE (ENV-AWARE CLEANUP, SINGLE-ARG LOADSTRING)
 -- ============================================================================
 local activeController = nil
 local isBusy = false
 local selectedChar = CHARACTERS[1]
+
+local function getGlobalFn(name)
+	if type(env[name]) == "function" then
+		return env[name], env
+	end
+	if type(_G[name]) == "function" then
+		return _G[name], _G
+	end
+	return nil, nil
+end
 
 local function cleanupActiveRig()
 	local cleaned = 0
@@ -454,31 +456,36 @@ local function cleanupActiveRig()
 	end
 	activeController = nil
 
-	if type(_G.ULTRAKILL_F3X) == "table" and type(_G.ULTRAKILL_F3X.cleanup) == "function" then
-		pcall(_G.ULTRAKILL_F3X.cleanup)
-		_G.ULTRAKILL_F3X = nil
-		cleaned += 1
+	for _, store in ipairs({ env, _G }) do
+		if type(store.ULTRAKILL_F3X) == "table" and type(store.ULTRAKILL_F3X.cleanup) == "function" then
+			pcall(store.ULTRAKILL_F3X.cleanup)
+			store.ULTRAKILL_F3X = nil
+			cleaned += 1
+		end
 	end
 
 	for _, globalName in ipairs(LEGACY_CLEANUP_GLOBALS) do
-		local fn = _G[globalName]
-		if type(fn) == "function" then
+		local fn, store = getGlobalFn(globalName)
+		if fn then
 			local ok, err = pcall(fn)
 			if ok then
 				cleaned += 1
 			else
 				logLine(globalName .. " error: " .. tostring(err), THEME.AccentRed)
 			end
-			_G[globalName] = nil
+			if store then
+				store[globalName] = nil
+			end
 		end
 	end
 
 	for _, globalName in ipairs(LEGACY_REBUILD_GLOBALS) do
+		env[globalName] = nil
 		_G[globalName] = nil
 	end
 
 	if cleaned > 0 then
-		logLine("Cleaned up previous rig (" .. cleaned .. " hook(s)).", THEME.TextMuted)
+		logLine("Cleaned previous rig (" .. cleaned .. " hook(s)).", THEME.TextMuted)
 	end
 end
 
@@ -500,7 +507,7 @@ local function fetchAndCompile(relPath)
 		return nil, "Remote returned error: " .. head
 	end
 
-	local fn, compileErr = loadstring(source, "@" .. relPath)
+	local fn, compileErr = loadstring(source)
 	if not fn then
 		return nil, "Compile error: " .. tostring(compileErr)
 	end
@@ -521,21 +528,6 @@ local function deployCharacter(charData)
 	isBusy = true
 	cleanupActiveRig()
 
-	-- 1. Load core.lua if present
-	local coreFn, coreErr = fetchAndCompile("core.lua")
-	if coreFn then
-		local okCore, coreRes = pcall(coreFn)
-		if not okCore then
-			logLine("core.lua runtime error: " .. tostring(coreRes), THEME.AccentRed)
-			isBusy = false
-			return
-		end
-		logLine("core.lua initialized.", THEME.SuccessGreen)
-	else
-		logLine("core.lua skipped (" .. tostring(coreErr) .. ")", THEME.AccentGold)
-	end
-
-	-- 2. Load character module
 	local charFn, charErr = fetchAndCompile(charData.path)
 	if not charFn then
 		logLine(tostring(charErr), THEME.AccentRed)
@@ -543,6 +535,7 @@ local function deployCharacter(charData)
 		return
 	end
 
+	logLine("Executing " .. charData.path .. "...", THEME.TextMuted)
 	local okRun, result = pcall(charFn)
 	if not okRun then
 		logLine("Runtime error in " .. charData.path .. ": " .. tostring(result), THEME.AccentRed)
@@ -562,15 +555,17 @@ local function triggerRebuild()
 		return
 	end
 
-	if type(_G.ULTRAKILL_F3X) == "table" and type(_G.ULTRAKILL_F3X.rebuild) == "function" then
-		local ok, err = pcall(_G.ULTRAKILL_F3X.rebuild)
-		logLine(ok and "Rebuild triggered via _G.ULTRAKILL_F3X." or ("Rebuild error: " .. tostring(err)), ok and THEME.SuccessGreen or THEME.AccentRed)
-		return
+	for _, store in ipairs({ env, _G }) do
+		if type(store.ULTRAKILL_F3X) == "table" and type(store.ULTRAKILL_F3X.rebuild) == "function" then
+			local ok, err = pcall(store.ULTRAKILL_F3X.rebuild)
+			logLine(ok and "Rebuild triggered via ULTRAKILL_F3X." or ("Rebuild error: " .. tostring(err)), ok and THEME.SuccessGreen or THEME.AccentRed)
+			return
+		end
 	end
 
 	for _, globalName in ipairs(LEGACY_REBUILD_GLOBALS) do
-		local fn = _G[globalName]
-		if type(fn) == "function" then
+		local fn = getGlobalFn(globalName)
+		if fn then
 			local ok, err = pcall(fn)
 			logLine(ok and ("Rebuild triggered (" .. globalName .. ").") or ("Rebuild error: " .. tostring(err)), ok and THEME.SuccessGreen or THEME.AccentRed)
 			return
@@ -616,32 +611,31 @@ for _, charData in ipairs(CHARACTERS) do
 	addStroke(btn, THEME.BorderDim, 1)
 
 	table.insert(sideButtons, { data = charData, btn = btn })
-	btn.MouseButton1Click:Connect(function()
+	btn.Activated:Connect(function()
 		selectCharacter(charData)
 	end)
 end
 
-DeployBtn.MouseButton1Click:Connect(function()
+DeployBtn.Activated:Connect(function()
 	task.spawn(function()
 		deployCharacter(selectedChar)
 	end)
 end)
 
-RebuildBtn.MouseButton1Click:Connect(function()
+RebuildBtn.Activated:Connect(function()
 	task.spawn(triggerRebuild)
 end)
 
-UnloadBtn.MouseButton1Click:Connect(function()
+UnloadBtn.Activated:Connect(function()
 	cleanupActiveRig()
 	logLine("All active rigs unloaded.", THEME.AccentGold)
 end)
 
-CloseBtn.MouseButton1Click:Connect(function()
+CloseBtn.Activated:Connect(function()
 	cleanupActiveRig()
 	ScreenGui:Destroy()
 end)
 
--- Initialize view
 selectCharacter(CHARACTERS[1])
 logLine("SmileOS 2.0 Terminal ready.", THEME.SuccessGreen)
 logLine("Select a machine and press [ DEPLOY ].", THEME.TextMuted)
