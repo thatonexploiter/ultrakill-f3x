@@ -1,5 +1,5 @@
 -- F3X / FORK3X ULTRAKILL LOADER GUI (PC + MOBILE)
--- Seleciona personagens (V1, V2 e futuros módulos) direto do GitHub com anti-cache
+-- Select characters (V1, V2 and future modules) straight from GitHub with anti-cache
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -9,13 +9,13 @@ local CoreGui = game:GetService("CoreGui")
 local plr = Players.LocalPlayer
 local env = (getgenv and getgenv()) or _G
 
--- Limpa instância anterior do Loader se já estiver aberto
+-- Clean up previous Loader instance if already open
 if env.F3XUltrakillLoaderCleanup then
 	pcall(env.F3XUltrakillLoaderCleanup)
 end
 
 -------------------------------------------------------------------
--- CONFIGURAÇÃO DO REPOSITÓRIO
+-- REPOSITORY CONFIG
 -------------------------------------------------------------------
 local REPO_BASE = "https://raw.githubusercontent.com/thatonexploiter/ultrakill-f3x/main/"
 local CORE_PATH = "core.lua"
@@ -25,7 +25,7 @@ local CHARACTERS = {
 		id = "v1",
 		code = "V1",
 		name = "V1 // SUPREME MACHINE",
-		desc = "Escala 1.0x • Feedbacker (Parry) • Marksman Revolver (Moedas) • Asas Amarelas",
+		desc = "1.0x scale • Feedbacker (Parry) • Marksman Revolver (Coins) • Yellow Wings",
 		tag = "1-0 / BASE",
 		accent = Color3.fromRGB(68, 128, 255),
 		path = "characters/v1.lua",
@@ -34,27 +34,27 @@ local CHARACTERS = {
 		id = "v2",
 		code = "V2",
 		name = "V2 // RECONSTRUCTED",
-		desc = "Escala 1.16x • Knuckleblaster (Explosão AoE) • Piercer & Core Eject • Asas Dinâmicas",
+		desc = "1.16x scale • Knuckleblaster (AoE Blast) • Piercer & Core Eject • Dynamic Wings",
 		tag = "1-4 / LIMBO",
 		accent = Color3.fromRGB(220, 48, 54),
 		path = "characters/v2.lua",
 	},
-	-- Para adicionar novos personagens depois, basta copiar um bloco acima:
+	-- To add new characters later, just copy a block above:
 	-- {
 	-- 	id = "gabriel",
 	-- 	code = "GB",
 	-- 	name = "GABRIEL // APOSTATE",
-	-- 	desc = "Descrição das armas e habilidades",
+	-- 	desc = "Weapon and ability description",
 	-- 	tag = "3-2",
 	-- 	accent = Color3.fromRGB(255, 205, 65),
 	-- 	path = "characters/gabriel.lua",
 	-- },
 
-    -- Personagens a fazer em breve: Minos Prime, Gabriel, Sisifus e Earthmover
+    -- Characters to make soon: Minos Prime, Gabriel, Sisyphus and Earthmover
 }
 
 -------------------------------------------------------------------
--- ESTADO & UTILITÁRIOS
+-- STATE & UTILITIES
 -------------------------------------------------------------------
 local isLoading = false
 local activeCharId = nil
@@ -103,17 +103,17 @@ local function fetchAndCompile(relativePath)
 		return game:HttpGet(url, true)
 	end)
 	if not okHttp or type(source) ~= "string" or #source == 0 then
-		return nil, "Falha no HttpGet (" .. relativePath .. "): " .. tostring(source)
+		return nil, "HttpGet failed (" .. relativePath .. "): " .. tostring(source)
 	end
 
-	-- Verifica se o GitHub devolveu 404 em texto
+	-- Check if GitHub returned a plain-text 404
 	if source:sub(1, 15) == "404: Not Found" then
-		return nil, "404 Not Found no GitHub: " .. relativePath
+		return nil, "404 Not Found on GitHub: " .. relativePath
 	end
 
 	local fn, compileErr = loadstring(source, "@" .. relativePath)
 	if not fn then
-		return nil, "Erro de sintaxe em " .. relativePath .. ": " .. tostring(compileErr)
+		return nil, "Syntax error in " .. relativePath .. ": " .. tostring(compileErr)
 	end
 
 	return fn, nil
@@ -132,7 +132,7 @@ local function getGuiParent()
 end
 
 -------------------------------------------------------------------
--- CONSTRUÇÃO DA INTERFACE (ESTILO TERMINAL ULTRAKILL)
+-- INTERFACE BUILD (ULTRAKILL TERMINAL STYLE)
 -------------------------------------------------------------------
 local gui = Instance.new("ScreenGui")
 gui.Name = "F3X_Ultrakill_Loader"
@@ -158,7 +158,7 @@ mainStroke.Color = Color3.fromRGB(190, 34, 42)
 mainStroke.Thickness = 1.5
 mainStroke.Parent = main
 
--- Barra superior (arrastável)
+-- Top bar (draggable)
 local topBar = Instance.new("Frame")
 topBar.Name = "TopBar"
 topBar.Size = UDim2.new(1, 0, 0, 42)
@@ -206,7 +206,7 @@ end
 local minBtn = makeHeaderBtn("-", -68, Color3.fromRGB(40, 44, 56))
 local closeBtn = makeHeaderBtn("X", -36, Color3.fromRGB(145, 32, 38))
 
--- Corpo com lista de personagens
+-- Body with character list
 local body = Instance.new("Frame")
 body.Name = "Body"
 body.Size = UDim2.new(1, 0, 1, -42)
@@ -230,7 +230,7 @@ listLayout.Padding = UDim.new(0, 10)
 listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 listLayout.Parent = scroll
 
--- Rodapé (status + controles rápidos)
+-- Footer (status + quick controls)
 local footer = Instance.new("Frame")
 footer.Size = UDim2.new(1, -24, 0, 72)
 footer.Position = UDim2.new(0, 12, 1, -80)
@@ -252,7 +252,7 @@ statusLabel.Size = UDim2.new(1, -16, 0, 24)
 statusLabel.Position = UDim2.fromOffset(8, 6)
 statusLabel.BackgroundTransparency = 1
 statusLabel.Font = Enum.Font.Code
-statusLabel.Text = "PRONTO // Selecione uma máquina para iniciar."
+statusLabel.Text = "READY // Select a machine to deploy."
 statusLabel.TextColor3 = Color3.fromRGB(180, 190, 205)
 statusLabel.TextSize = 11
 statusLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -283,84 +283,84 @@ local function makeFooterBtn(text, xScale, xOffset, color)
 end
 
 local resyncBtn = makeFooterBtn("RE-SYNC RIG (F7)", 0, 6, Color3.fromRGB(45, 90, 170))
-local stopBtn = makeFooterBtn("PARAR / LIMPAR (F6)", 0.5, 4, Color3.fromRGB(155, 36, 44))
+local stopBtn = makeFooterBtn("STOP / CLEANUP (F6)", 0.5, 4, Color3.fromRGB(155, 36, 44))
 
 -------------------------------------------------------------------
--- ATUALIZAÇÃO VISUAL DOS CARDS
+-- CARD VISUAL REFRESH
 -------------------------------------------------------------------
 local function refreshCardHighlights()
 	for id, info in pairs(cardButtons) do
 		local isActive = (id == activeCharId)
 		info.stroke.Color = isActive and info.accent or Color3.fromRGB(45, 49, 62)
 		info.stroke.Thickness = isActive and 2 or 1
-		info.badge.Text = isActive and "ATIVO" or info.tag
+		info.badge.Text = isActive and "ACTIVE" or info.tag
 		info.badge.BackgroundColor3 = isActive and info.accent or Color3.fromRGB(32, 35, 45)
 		info.badge.TextColor3 = isActive and Color3.fromRGB(12, 13, 17) or Color3.fromRGB(210, 215, 225)
 	end
 end
 
 -------------------------------------------------------------------
--- FLUXO DE CARREGAMENTO (CLEANUP -> CORE -> MÓDULO)
+-- LOAD FLOW (CLEANUP -> CORE -> MODULE)
 -------------------------------------------------------------------
 local function loadCharacter(entry)
 	if isLoading then
-		setStatus("AGUARDE // Já existe um carregamento em andamento...", Color3.fromRGB(255, 205, 65))
+		setStatus("WAIT // A load is already in progress...", Color3.fromRGB(255, 205, 65))
 		return
 	end
 	isLoading = true
 
 	task.spawn(function()
-		setStatus("1/3 Limpando rig e conexões anteriores...", Color3.fromRGB(255, 205, 65))
+		setStatus("1/3 Cleaning previous rig and connections...", Color3.fromRGB(255, 205, 65))
 		cleanupActiveRig()
 		refreshCardHighlights()
 		task.wait(0.08)
 
-		setStatus("2/3 Baixando core.lua (anti-cache)...", Color3.fromRGB(115, 220, 255))
+		setStatus("2/3 Downloading core.lua (anti-cache)...", Color3.fromRGB(115, 220, 255))
 		local coreFn, coreErr = fetchAndCompile(CORE_PATH)
 		if not coreFn then
-			setStatus("ERRO: " .. tostring(coreErr), Color3.fromRGB(255, 85, 95))
+			setStatus("ERROR: " .. tostring(coreErr), Color3.fromRGB(255, 85, 95))
 			isLoading = false
 			return
 		end
 
 		local okCoreRun, Core = pcall(coreFn)
 		if not okCoreRun or type(Core) ~= "table" then
-			setStatus("ERRO ao iniciar Core: " .. tostring(Core), Color3.fromRGB(255, 85, 95))
+			setStatus("ERROR starting Core: " .. tostring(Core), Color3.fromRGB(255, 85, 95))
 			isLoading = false
 			return
 		end
 
-		setStatus("3/3 Baixando " .. entry.code .. " (" .. entry.path .. ")...", entry.accent)
+		setStatus("3/3 Downloading " .. entry.code .. " (" .. entry.path .. ")...", entry.accent)
 		local charFn, charErr = fetchAndCompile(entry.path)
 		if not charFn then
-			setStatus("ERRO: " .. tostring(charErr), Color3.fromRGB(255, 85, 95))
+			setStatus("ERROR: " .. tostring(charErr), Color3.fromRGB(255, 85, 95))
 			isLoading = false
 			return
 		end
 
 		local okCharRun, initChar = pcall(charFn)
 		if not okCharRun or type(initChar) ~= "function" then
-			setStatus("ERRO no módulo " .. entry.code .. ": " .. tostring(initChar), Color3.fromRGB(255, 85, 95))
+			setStatus("ERROR in module " .. entry.code .. ": " .. tostring(initChar), Color3.fromRGB(255, 85, 95))
 			isLoading = false
 			return
 		end
 
 		local okInit, initErr = pcall(initChar, Core)
 		if not okInit then
-			setStatus("ERRO ao montar " .. entry.code .. ": " .. tostring(initErr), Color3.fromRGB(255, 85, 95))
+			setStatus("ERROR building " .. entry.code .. ": " .. tostring(initErr), Color3.fromRGB(255, 85, 95))
 			isLoading = false
 			return
 		end
 
 		activeCharId = entry.id
 		refreshCardHighlights()
-		setStatus("ONLINE // " .. entry.name .. " carregado!", Color3.fromRGB(85, 245, 145))
+		setStatus("ONLINE // " .. entry.name .. " loaded!", Color3.fromRGB(85, 245, 145))
 		isLoading = false
 	end)
 end
 
 -------------------------------------------------------------------
--- GERAR CARDS NA GUI
+-- BUILD CARDS IN THE GUI
 -------------------------------------------------------------------
 for idx, entry in ipairs(CHARACTERS) do
 	local card = Instance.new("TextButton")
@@ -452,7 +452,7 @@ for idx, entry in ipairs(CHARACTERS) do
 end
 
 -------------------------------------------------------------------
--- DRAG (MOUSE + TOUCH) & BOTÕES DA GUI
+-- DRAG (MOUSE + TOUCH) & GUI BUTTONS
 -------------------------------------------------------------------
 local dragging = false
 local dragInput = nil
@@ -499,16 +499,16 @@ end))
 
 table.insert(connections, resyncBtn.MouseButton1Click:Connect(function()
 	if triggerRebuild() then
-		setStatus("RE-SYNC // Reconstruindo rig atual...", Color3.fromRGB(115, 220, 255))
+		setStatus("RE-SYNC // Rebuilding current rig...", Color3.fromRGB(115, 220, 255))
 	else
-		setStatus("AVISO // Nenhum personagem ativo para re-sincronizar.", Color3.fromRGB(255, 205, 65))
+		setStatus("WARN // No active character to re-sync.", Color3.fromRGB(255, 205, 65))
 	end
 end))
 
 table.insert(connections, stopBtn.MouseButton1Click:Connect(function()
 	cleanupActiveRig()
 	refreshCardHighlights()
-	setStatus("PARADO // Rig removido e personagem restaurado.", Color3.fromRGB(255, 130, 130))
+	setStatus("STOPPED // Rig removed and character restored.", Color3.fromRGB(255, 130, 130))
 end))
 
 local function destroyLoader()
