@@ -1,5 +1,5 @@
 -- F3X / FORK3X ULTRAKILL CORE ENGINE (R6 + R15 | PC + MOBILE)
--- Motor completo compartilhado (F3X Sync com seq/ack, HUD 3D, Controles Mobile originais, Knockback 3 camadas & FE Ragdoll)
+-- Motor completo compartilhado (F3X Sync com seq/ack, HUD 3D, Controles Mobile originais, Knockback 3 camadas & FE Ragdoll + Floaty Air Movement)
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -88,8 +88,24 @@ local DEFAULT_CONFIG = {
 	SOLE_DEPTH = 3.66,
 
 	ENABLE_SPRINT = true,
-	WALK_SPEED = 16,
-	SPRINT_SPEED = 32,
+	WALK_SPEED = 18,
+	SPRINT_SPEED = 34,
+
+	ENABLE_AIR_MOVEMENT = true,
+	JUMP_POWER = 54,
+	AIR_GRAVITY_CANCEL = 0.42,
+	GLIDE_GRAVITY_CANCEL = 0.74,
+	GLIDE_MAX_FALL = 16,
+	AIR_STRAFE_ACCEL = 52,
+	AIR_DRAG = 0.28,
+	DASH_JUMP_MULT = 0.94,
+	WALL_JUMP_ENABLED = true,
+	MAX_WALL_JUMPS = 3,
+	WALL_JUMP_UP = 58,
+	WALL_JUMP_PUSH = 44,
+	WALL_DETECT_DIST = 3.6,
+	SLAM_STORAGE_WINDOW = 0.20,
+	SLAM_STORAGE_JUMP = 108,
 
 	ENABLE_DASH = true,
 	DASH_COOLDOWN = 0.25,
@@ -99,10 +115,10 @@ local DEFAULT_CONFIG = {
 	STAMINA_REGEN_TIME = 1.25,
 
 	ENABLE_SLIDE_SLAM = true,
-	SLIDE_SPEED = 44,
+	SLIDE_SPEED = 46,
 	SLIDE_DURATION = 0.55,
 	SLIDE_COOLDOWN = 0.55,
-	SLAM_SPEED = 96,
+	SLAM_SPEED = 105,
 	SLAM_MIN_HEIGHT = 6,
 	SLAM_RANGE = 13.5,
 
@@ -2207,8 +2223,87 @@ local function stepTargetRagdolls(dt)
 end
 
 -------------------------------------------------------------------
--- DASH / SLIDE / SLAM
+-- DASH / SLIDE / SLAM / AERIAL JUMP & WALL-KICK
 -------------------------------------------------------------------
+local function isHumInAir(hum)
+	if not hum then return false end
+	local hState = hum:GetState()
+	return (hState == Enum.HumanoidStateType.Freefall or hState == Enum.HumanoidStateType.Jumping)
+		or (hum.FloorMaterial == Enum.Material.Air and hState ~= Enum.HumanoidStateType.Climbing and hState ~= Enum.HumanoidStateType.Swimming and hState ~= Enum.HumanoidStateType.Seated)
+end
+
+local function findNearbyWallNormal(c, hrp)
+	local rp = buildTargetRayParams(c)
+	local dirs = {
+		hrp.CFrame.LookVector,
+		-hrp.CFrame.LookVector,
+		hrp.CFrame.RightVector,
+		-hrp.CFrame.RightVector,
+	}
+	for _, d in ipairs(dirs) do
+		local res = workspace:Raycast(hrp.Position, d * CONFIG.WALL_DETECT_DIST, rp)
+		if res and res.Instance and res.Instance.CanCollide then
+			return res.Normal, res.Position
+		end
+	end
+	return nil, nil
+end
+
+local function handleJumpAction()
+	if not (STATE and STATE.alive and CONFIG.ENABLE_AIR_MOVEMENT) or STATE.isSettingUp then return end
+	local c = getChar()
+	local hrp, hum = c and c:FindFirstChild("HumanoidRootPart"), c and c:FindFirstChildOfClass("Humanoid")
+	if not (hrp and hum and hum.Health > 0) then return end
+
+	local now = os.clock()
+	local isAir = isHumInAir(hum)
+
+	-- 1. Slam Storage Super-Jump
+	if STATE.slamStored and (now - STATE.lastSlamLand <= CONFIG.SLAM_STORAGE_WINDOW) then
+		STATE.slamStored = false
+		STATE.slam.active = false
+		local vel = hrp.AssemblyLinearVelocity
+		hrp.AssemblyLinearVelocity = V(vel.X, CONFIG.SLAM_STORAGE_JUMP, vel.Z)
+		STATE.fovKick = math.max(STATE.fovKick, 12)
+		playSFX("DASH", 1.35, 1.0, "PARRY")
+		spawnRing(hrp.Position - V(0, 2.0, 0), CONFIG.BEAM_CYAN, 0.9, 6.2, 0.24)
+		addStyleBonus("SLAM STORAGE", 120, CONFIG.BEAM_CYAN)
+		return
+	end
+
+	-- 2. Dash-Jump / Slide-Jump Momentum Preservation
+	if not isAir and (STATE.dash.active or STATE.slide.active) then
+		local boostDir = (hum.MoveDirection.Magnitude > 0.1) and V(hum.MoveDirection.X, 0, hum.MoveDirection.Z).Unit or (STATE.dash.active and STATE.dash.dir or STATE.slide.dir)
+		local boostSpd = math.max(STATE.airVelXZ.Magnitude, CONFIG.DASH_SPEED * CONFIG.DASH_JUMP_MULT)
+		STATE.dash.active = false
+		STATE.slide.active = false
+		STATE.airVelXZ = boostDir * boostSpd
+		hrp.AssemblyLinearVelocity = V(STATE.airVelXZ.X, CONFIG.JUMP_POWER * 1.08, STATE.airVelXZ.Z)
+		STATE.fovKick = math.max(STATE.fovKick, 9)
+		playSFX("DASH", 1.25, 0.85, "PARRY")
+		return
+	end
+
+	-- 3. Mid-Air Wall-Kick
+	if isAir and CONFIG.WALL_JUMP_ENABLED and STATE.wallJumpsLeft > 0 then
+		local wallNormal, hitPos = findNearbyWallNormal(c, hrp)
+		if wallNormal then
+			STATE.wallJumpsLeft -= 1
+			STATE.slam.active = false
+			STATE.dash.active = false
+			local flatNorm = V(wallNormal.X, 0, wallNormal.Z)
+			flatNorm = (flatNorm.Magnitude > 0.01) and flatNorm.Unit or -hrp.CFrame.LookVector
+			local wish = (hum.MoveDirection.Magnitude > 0.1) and V(hum.MoveDirection.X, 0, hum.MoveDirection.Z).Unit or V(0, 0, 0)
+			STATE.airVelXZ = flatNorm * CONFIG.WALL_JUMP_PUSH + wish * 18
+			hrp.AssemblyLinearVelocity = V(STATE.airVelXZ.X, CONFIG.WALL_JUMP_UP, STATE.airVelXZ.Z)
+			STATE.fovKick = math.max(STATE.fovKick, 7)
+			playSFX("DASH", 1.38, 0.9, "PARRY")
+			if hitPos then spawnFlash(hitPos, CONFIG.BEAM_CYAN, 0.7, 2.8, 0.16) end
+			addStyleBonus("WALL KICK", 50, CONFIG.BEAM_CYAN)
+		end
+	end
+end
+
 function Core.triggerDash()
 	if not (STATE and CONFIG.ENABLE_DASH) or STATE.isSettingUp then return end
 	local now = os.clock()
@@ -2227,13 +2322,16 @@ function Core.triggerDash()
 	STATE.dash.active, STATE.dash.lastUsed, STATE.dash.startTime = true, now, now
 	STATE.dash.dir = dashDir
 	STATE.dash.localDir = hrp.CFrame:VectorToObjectSpace(dashDir)
+	STATE.airVelXZ = dashDir * CONFIG.DASH_SPEED
 	STATE.slide.active = false
 	STATE.slam.active = false
+	STATE.isGliding = false
 
 	STATE.fovKick = 12
 	if cam then cam.FieldOfView = cam.FieldOfView + 6 end
 
-	hrp.AssemblyLinearVelocity = V(dashDir.X * CONFIG.DASH_SPEED, 2, dashDir.Z * CONFIG.DASH_SPEED)
+	local yVel = isHumInAir(hum) and 2 or hrp.AssemblyLinearVelocity.Y
+	hrp.AssemblyLinearVelocity = V(dashDir.X * CONFIG.DASH_SPEED, yVel, dashDir.Z * CONFIG.DASH_SPEED)
 	playSFX("DASH", 1.15 + (CONFIG.MAX_STAMINA - STATE.dash.stamina) * 0.06, 1.0, "PARRY")
 	spawnFlash(hrp.Position, CONFIG.BEAM_CYAN, 1.1, 4.8, 0.18)
 	spawnRing(hrp.Position, CONFIG.BEAM_CYAN, 0.8, 5.2, 0.20)
@@ -2247,15 +2345,14 @@ function Core.triggerSlideOrSlam()
 	local hrp, hum = c and c:FindFirstChild("HumanoidRootPart"), c and c:FindFirstChildOfClass("Humanoid")
 	if not (hrp and hum) or STATE.isSettingUp then return end
 
-	local hState = hum:GetState()
-	local isAir = (hState == Enum.HumanoidStateType.Freefall or hState == Enum.HumanoidStateType.Jumping)
-		or (hum.FloorMaterial == Enum.Material.Air and hState ~= Enum.HumanoidStateType.Climbing and hState ~= Enum.HumanoidStateType.Swimming and hState ~= Enum.HumanoidStateType.Seated)
+	local isAir = isHumInAir(hum)
 
 	if isAir then
 		local floorRes = workspace:Raycast(hrp.Position, V(0, -400, 0), buildTargetRayParams(c))
 		local dropHeight = floorRes and (hrp.Position.Y - floorRes.Position.Y) or 60
 		STATE.slide.active, STATE.slide.startTime = true, now
 		STATE.slam.active, STATE.slam.startTime = true, now
+		STATE.isGliding = false
 		STATE.slamArmed = true
 		hrp.AssemblyLinearVelocity = V(hrp.AssemblyLinearVelocity.X * 0.25, -CONFIG.SLAM_SPEED, hrp.AssemblyLinearVelocity.Z * 0.25)
 		STATE.fovKick = math.max(STATE.fovKick, 14)
@@ -2272,6 +2369,7 @@ function Core.triggerSlideOrSlam()
 	flatLook = (flatLook.Magnitude < 0.01) and V(0, 0, -1) or flatLook.Unit
 	local moveDir = (hum.MoveDirection.Magnitude > 0.1) and V(hum.MoveDirection.X, 0, hum.MoveDirection.Z).Unit or flatLook
 	STATE.slide.dir = moveDir
+	STATE.airVelXZ = moveDir * CONFIG.SLIDE_SPEED
 	hrp.AssemblyLinearVelocity = V(moveDir.X * CONFIG.SLIDE_SPEED, hrp.AssemblyLinearVelocity.Y, moveDir.Z * CONFIG.SLIDE_SPEED)
 	STATE.fovKick = math.max(STATE.fovKick, 9)
 	playSFX("STEP", 0.62, 1.0, "DASH")
@@ -2424,10 +2522,19 @@ local function waitForEndpoint(timeout, mySetupId)
 	return nil
 end
 
+local function destroyAirPhysics()
+	if not STATE then return end
+	if STATE.antiGravForce then pcall(function() STATE.antiGravForce:Destroy() end); STATE.antiGravForce = nil end
+	if STATE.antiGravAtt then pcall(function() STATE.antiGravAtt:Destroy() end); STATE.antiGravAtt = nil end
+	STATE.isGliding = false
+	STATE.slamStored = false
+end
+
 local function cleanupRigParts(ep)
 	if not STATE then return end
 	if not ep or not ep.Parent then ep = getF3XEndpoint() end
 
+	destroyAirPhysics()
 	restoreAllRagdolls()
 	for _, ncc in ipairs(STATE.noColConstraints) do pcall(function() ncc:Destroy() end) end
 	STATE.noColConstraints = {}
@@ -2439,6 +2546,7 @@ local function cleanupRigParts(ep)
 		pcall(function() hum.CameraOffset = V(0, 0, 0) end)
 		if STATE.touchedWalkSpeed then
 			pcall(function() hum.WalkSpeed = CONFIG.WALK_SPEED end)
+			pcall(function() hum.JumpPower = 50 end)
 			pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true) end)
 			pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true) end)
 		end
@@ -2557,6 +2665,28 @@ setupRig = function()
 		STATE.lastHealth = hum.Health
 		STATE.hardDamage = hum.Health
 		STATE.dash.stamina = CONFIG.MAX_STAMINA
+		STATE.wallJumpsLeft = CONFIG.MAX_WALL_JUMPS
+		STATE.airVelXZ = V(0, 0, 0)
+
+		if CONFIG.ENABLE_AIR_MOVEMENT then
+			STATE.touchedWalkSpeed = true
+			pcall(function()
+				hum.UseJumpPower = true
+				hum.JumpPower = CONFIG.JUMP_POWER
+			end)
+			local att = Instance.new("Attachment")
+			att.Name = "UK_MoveAtt"
+			att.Parent = hrp
+			local vf = Instance.new("VectorForce")
+			vf.Name = "UK_AntiGrav"
+			vf.Attachment0 = att
+			vf.RelativeTo = Enum.ActuatorRelativeTo.World
+			vf.ApplyAtCenterOfMass = true
+			vf.Force = V(0, 0, 0)
+			vf.Parent = hrp
+			STATE.antiGravAtt = att
+			STATE.antiGravForce = vf
+		end
 
 		if CONFIG.DISABLE_FALLING_DOWN then
 			STATE.touchedWalkSpeed = true
@@ -2746,6 +2876,7 @@ setupRig = function()
 			if STATE and STATE.alive then
 				local curEp = Core.getEndpoint()
 				task.spawn(function()
+					destroyAirPhysics()
 					restoreAllRagdolls()
 					cleanupRigParts(curEp)
 				end)
@@ -2838,6 +2969,14 @@ function Core.start(charDef)
 		airTime = 0, wasAir = false, landRecover = 0, localFwd = 0, localStrafe = 0,
 		vertVel = 0, lastYaw = 0, turnRate = 0, touchedWalkSpeed = false,
 		hardDamage = 0, lastHealth = 100, camShake = 0, fovKick = 0,
+
+		isGliding = false,
+		airVelXZ = V(0, 0, 0),
+		wallJumpsLeft = CONFIG.MAX_WALL_JUMPS,
+		lastSlamLand = 0,
+		slamStored = false,
+		antiGravAtt = nil,
+		antiGravForce = nil,
 
 		modelEntries = {}, buckets = {}, proxyAccessories = {}, proxyParts = {},
 		noColConstraints = {}, hiddenRealParts = {}, hiddenRealDecals = {},
@@ -2958,9 +3097,7 @@ function Core.start(charDef)
 		local vel = hrp.AssemblyLinearVelocity
 		local flatVel = V(vel.X, 0, vel.Z)
 		local speed = flatVel.Magnitude
-		local hState = hum:GetState()
-		local isAir = (hState == Enum.HumanoidStateType.Freefall or hState == Enum.HumanoidStateType.Jumping)
-			or (hum.FloorMaterial == Enum.Material.Air and hState ~= Enum.HumanoidStateType.Climbing and hState ~= Enum.HumanoidStateType.Swimming and hState ~= Enum.HumanoidStateType.Seated)
+		local isAir = isHumInAir(hum)
 
 		if STATE.slam.active then
 			if isAir then
@@ -2968,6 +3105,8 @@ function Core.start(charDef)
 			else
 				STATE.slam.active = false
 				STATE.slamArmed = false
+				STATE.lastSlamLand = nowClock
+				STATE.slamStored = true
 				STATE.landRecover = 1.4
 				STATE.camShake = math.max(STATE.camShake, 0.75)
 				playSFX("LAND", 0.65, 1.4, "PARRY")
@@ -2986,10 +3125,17 @@ function Core.start(charDef)
 			end
 		end
 
-		if STATE.wasAir and not isAir and STATE.vertVel < -14 and not STATE.slam.active then
-			STATE.landRecover = 1.0
-			playSFX("LAND", 1.1, clamp(math.abs(STATE.vertVel) / 60, 0.35, 1.0), "PARRY")
+		if STATE.wasAir and not isAir then
+			STATE.wallJumpsLeft = CONFIG.MAX_WALL_JUMPS
+			STATE.isGliding = false
+			if STATE.vertVel < -14 and not STATE.slam.active then
+				STATE.landRecover = 1.0
+				playSFX("LAND", 1.1, clamp(math.abs(STATE.vertVel) / 60, 0.35, 1.0), "PARRY")
+			end
+		elseif not isAir and (nowClock - STATE.lastSlamLand > CONFIG.SLAM_STORAGE_WINDOW) then
+			STATE.slamStored = false
 		end
+
 		STATE.airTime = isAir and (STATE.airTime + dt) or 0
 		STATE.wasAir = isAir
 		STATE.vertVel = lerp(STATE.vertVel, vel.Y, clamp(dt * 18, 0, 1))
@@ -3026,7 +3172,7 @@ function Core.start(charDef)
 		if CONFIG.ENABLE_FOV_KICK and cam then
 			STATE.fovKick = math.max(0, STATE.fovKick - dt * 26)
 			STATE.camShake = math.max(0, STATE.camShake - dt * 3.5)
-			local targetFOV = CONFIG.BASE_FOV + STATE.sprintBlend * 6 + (STATE.slide.active and 5 or 0) + STATE.fovKick
+			local targetFOV = CONFIG.BASE_FOV + STATE.sprintBlend * 6 + (STATE.slide.active and 5 or 0) + (STATE.isGliding and 3 or 0) + STATE.fovKick
 			cam.FieldOfView = lerp(cam.FieldOfView, targetFOV, clamp(dt * 14, 0, 1))
 			if STATE.camShake > 0.01 then
 				hum.CameraOffset = V((math.random() - 0.5) * STATE.camShake * 0.45, (math.random() - 0.5) * STATE.camShake * 0.45, 0)
@@ -3040,19 +3186,57 @@ function Core.start(charDef)
 			if dEl < CONFIG.DASH_DURATION then
 				local t = dEl / CONFIG.DASH_DURATION
 				local curDashSpd = lerp(CONFIG.DASH_SPEED, CONFIG.SPRINT_SPEED, t * t)
-				hrp.AssemblyLinearVelocity = V(STATE.dash.dir.X * curDashSpd, math.max(hrp.AssemblyLinearVelocity.Y * 0.15, 0), STATE.dash.dir.Z * curDashSpd)
+				STATE.airVelXZ = STATE.dash.dir * curDashSpd
+				local yVel = isAir and 2 or vel.Y
+				hrp.AssemblyLinearVelocity = V(STATE.airVelXZ.X, yVel, STATE.airVelXZ.Z)
 			else
 				STATE.dash.active = false
-				hrp.AssemblyLinearVelocity = V(STATE.dash.dir.X * CONFIG.SPRINT_SPEED, hrp.AssemblyLinearVelocity.Y, STATE.dash.dir.Z * CONFIG.SPRINT_SPEED)
+				local endSpd = isAir and math.max(CONFIG.SPRINT_SPEED, STATE.airVelXZ.Magnitude) or CONFIG.SPRINT_SPEED
+				STATE.airVelXZ = STATE.dash.dir * endSpd
+				hrp.AssemblyLinearVelocity = V(STATE.airVelXZ.X, vel.Y, STATE.airVelXZ.Z)
 			end
 		end
 
 		if STATE.slide.active then
 			local sEl = nowClock - STATE.slide.startTime
 			if sEl < CONFIG.SLIDE_DURATION and not isAir then
-				hrp.AssemblyLinearVelocity = V(STATE.slide.dir.X * CONFIG.SLIDE_SPEED, vel.Y, STATE.slide.dir.Z * CONFIG.SLIDE_SPEED)
+				STATE.airVelXZ = STATE.slide.dir * CONFIG.SLIDE_SPEED
+				hrp.AssemblyLinearVelocity = V(STATE.airVelXZ.X, vel.Y, STATE.airVelXZ.Z)
 			else
 				STATE.slide.active = false
+			end
+		end
+
+		-- Floaty Air Physics + Wing Glide + Uncapped Air-Strafe
+		if CONFIG.ENABLE_AIR_MOVEMENT and STATE.antiGravForce and STATE.antiGravForce.Parent then
+			if isAir and not STATE.slam.active and not STATE.dash.active then
+				local holdingJump = (not typing) and (UIS:IsKeyDown(Enum.KeyCode.Space) or hum.Jump)
+				STATE.isGliding = holdingJump and vel.Y < 4
+
+				local cancel = STATE.isGliding and CONFIG.GLIDE_GRAVITY_CANCEL or CONFIG.AIR_GRAVITY_CANCEL
+				STATE.antiGravForce.Force = V(0, hrp.AssemblyMass * workspace.Gravity * cancel, 0)
+
+				if flatVel.Magnitude > STATE.airVelXZ.Magnitude then
+					STATE.airVelXZ = flatVel
+				end
+
+				local wishDir = hum.MoveDirection
+				if wishDir.Magnitude > 0.05 then
+					local wishXZ = V(wishDir.X, 0, wishDir.Z).Unit
+					local targetSpd = math.max(hum.WalkSpeed, STATE.airVelXZ.Magnitude)
+					STATE.airVelXZ = STATE.airVelXZ:Lerp(wishXZ * targetSpd, clamp(dt * (CONFIG.AIR_STRAFE_ACCEL / 10), 0, 1))
+				else
+					STATE.airVelXZ = STATE.airVelXZ * math.max(0, 1 - CONFIG.AIR_DRAG * dt)
+				end
+
+				local nextY = STATE.isGliding and math.max(vel.Y, -CONFIG.GLIDE_MAX_FALL) or vel.Y
+				hrp.AssemblyLinearVelocity = V(STATE.airVelXZ.X, nextY, STATE.airVelXZ.Z)
+			else
+				STATE.isGliding = false
+				STATE.antiGravForce.Force = V(0, 0, 0)
+				if not STATE.dash.active and not STATE.slide.active then
+					STATE.airVelXZ = flatVel
+				end
 			end
 		end
 
@@ -3183,7 +3367,9 @@ function Core.start(charDef)
 		end
 
 		if gp or GuiService.MenuIsOpen or not (STATE and STATE.alive) then return end
-		if inp.KeyCode == Enum.KeyCode.Q then
+		if inp.KeyCode == Enum.KeyCode.Space then
+			handleJumpAction()
+		elseif inp.KeyCode == Enum.KeyCode.Q then
 			Core.triggerDash()
 		elseif inp.KeyCode == Enum.KeyCode.C or inp.KeyCode == Enum.KeyCode.LeftControl then
 			Core.triggerSlideOrSlam()
@@ -3203,6 +3389,12 @@ function Core.start(charDef)
 		end
 	end))
 
+	table.insert(STATE.connections, UIS.JumpRequest:Connect(function()
+		if UIS.TouchEnabled and STATE and STATE.alive then
+			handleJumpAction()
+		end
+	end))
+
 	table.insert(STATE.connections, plr.CharacterAdded:Connect(function()
 		if not STATE then return end
 		STATE.setupId += 1
@@ -3212,6 +3404,9 @@ function Core.start(charDef)
 		STATE.ramBusy, STATE.seatBusy = false, false
 		STATE.walkBlend, STATE.sprintBlend, STATE.airBlend = 0, 0, 0
 		STATE.slide.active, STATE.slam.active = false, false
+		STATE.isGliding, STATE.slamStored = false, false
+		STATE.airVelXZ = V(0, 0, 0)
+		destroyAirPhysics()
 		clearCharConnections()
 		clearProxyConnections()
 		restoreAllRagdolls()

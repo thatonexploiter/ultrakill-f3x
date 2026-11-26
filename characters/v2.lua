@@ -1,4 +1,4 @@
--- ULTRAKILL V2 MODULE (CLAIR DE LUNE - ESCALA 1.16x + KNUCKLEBLASTER + PIERCER / SHOTGUN)
+-- ULTRAKILL V2 MODULE (CLAIR DE LUNE - ESCALA 1.16x + KNUCKLEBLASTER + PIERCER / SHOTGUN + AERIAL MOVEMENT)
 -- Carregado dinamicamente pelo loader.lua recebendo Core
 
 return function(Core)
@@ -64,7 +64,6 @@ return function(Core)
 			{ partType = "Cylinder", size = V(0.38, 0.30, 0.30) * S, color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, -0.36 * S, 0.06 * S) * angles(0, 0, 90) },
 			{ partType = "Cylinder", size = V(0.38, 0.13, 0.13) * S, color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, relCF = C(-0.15 * S, -0.34 * S, -0.02 * S) * angles(10, 0, 82) },
 			{ partType = "Cylinder", size = V(0.38, 0.13, 0.13) * S, color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, relCF = C(0.15 * S, -0.34 * S, -0.02 * S) * angles(10, 0, 98) },
-			-- Chassis da cabeça vermelho mais robusto
 			{ partType = "Normal",   size = V(0.80, 0.65, 1.16) * S, color = PALETTE.RED_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, 0.04 * S, 0.05 * S) * angles(-6, 0, 0) },
 			{ partType = "Wedge",    size = V(0.88, 0.22, 1.32) * S, color = PALETTE.RED_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, 0.44 * S, -0.02 * S) * angles(-5, 0, 0) },
 			{ partType = "Normal",   size = V(0.90, 0.11, 0.44) * S, color = PALETTE.LIGHT_RED_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, 0.37 * S, -0.58 * S) * angles(-12, 0, 0) },
@@ -75,7 +74,6 @@ return function(Core)
 			{ partType = "Normal",   size = V(0.64, 0.50, 0.28) * S, color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, 0.06 * S, 0.67 * S) * angles(-6, 0, 0) },
 			{ partType = "Normal",   size = V(0.46, 0.24, 0.12) * S, color = PALETTE.GUN_STEEL, mat = Enum.Material.Metal, relCF = C(0, 0.16 * S, 0.80 * S) * angles(-6, 0, 0) },
 			{ partType = "Wedge",    size = V(0.64, 0.22, 0.76) * S, color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, -0.27 * S, -0.14 * S) * angles(174, 0, 0) },
-			-- Visor CRT + Lente óptica amarela
 			{ partType = "Normal",   size = V(0.68, 0.50, 0.14) * S, color = PALETTE.BLACK_TRIM, mat = Enum.Material.SmoothPlastic, relCF = C(0, 0.03 * S, -0.51 * S) * angles(-6, 0, 0) },
 			{ partType = "Cylinder", size = V(0.13, 0.46, 0.46) * S, color = PALETTE.GUN_STEEL, mat = Enum.Material.Metal, relCF = C(0, 0.03 * S, -0.56 * S) * angles(-6, 0, 0) * angles(0, 90, 0) },
 			{ partType = "Cylinder", size = V(0.15, 0.36, 0.36) * S, color = PALETTE.YELLOW_NEON, mat = Enum.Material.Neon, relCF = C(0, 0.03 * S, -0.58 * S) * angles(-6, 0, 0) * angles(0, 90, 0), light = true, lightColor = PALETTE.YELLOW_NEON },
@@ -84,26 +82,21 @@ return function(Core)
 
 	local function getV2ChestSpecs()
 		return {
-			-- Blindagem peitoral mais espessa que a do V1
 			{ partType = "Normal",   size = V(1.88, 0.84, 0.84) * S, color = PALETTE.RED_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, 0.12 * S, 0.02 * S) },
 			{ partType = "Wedge",    size = V(0.84, 0.66, 0.34) * S, color = PALETTE.LIGHT_RED_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(-0.48 * S, 0.16 * S, -0.49 * S) * angles(0, 12, 180) },
 			{ partType = "Wedge",    size = V(0.84, 0.66, 0.34) * S, color = PALETTE.LIGHT_RED_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0.48 * S, 0.16 * S, -0.49 * S) * angles(0, -12, 180) },
-			-- Esterno reforçado e fenda luminosa
 			{ partType = "Normal",   size = V(0.36, 0.80, 0.26) * S, color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, 0.10 * S, -0.41 * S) },
 			{ partType = "Normal",   size = V(0.11, 0.42, 0.09) * S, color = PALETTE.YELLOW_NEON, mat = Enum.Material.Neon, relCF = C(0, 0.16 * S, -0.51 * S), light = true, lightColor = PALETTE.YELLOW_NEON },
-			-- Entradas de ar peitorais (preto + barra neon amarela)
 			{ partType = "Normal",   size = V(0.44, 0.19, 0.13) * S, color = PALETTE.BLACK_TRIM, mat = Enum.Material.SmoothPlastic, relCF = C(-0.55 * S, -0.06 * S, -0.48 * S) * angles(-10, 12, 0) },
 			{ partType = "Normal",   size = V(0.44, 0.19, 0.13) * S, color = PALETTE.BLACK_TRIM, mat = Enum.Material.SmoothPlastic, relCF = C(0.55 * S, -0.06 * S, -0.48 * S) * angles(-10, -12, 0) },
 			{ partType = "Normal",   size = V(0.34, 0.07, 0.09) * S, color = PALETTE.YELLOW_NEON, mat = Enum.Material.Neon, relCF = C(-0.55 * S, -0.06 * S, -0.52 * S) * angles(-10, 12, 0) },
 			{ partType = "Normal",   size = V(0.34, 0.07, 0.09) * S, color = PALETTE.YELLOW_NEON, mat = Enum.Material.Neon, relCF = C(0.55 * S, -0.06 * S, -0.52 * S) * angles(-10, -12, 0) },
-			-- Selo "V2" estilizado em blocos no peito esquerdo (placa escura + letra V + numeral 2)
 			{ partType = "Normal",   size = V(0.36, 0.24, 0.05) * S, color = PALETTE.BLACK_TRIM, mat = Enum.Material.SmoothPlastic, relCF = C(0.48 * S, 0.26 * S, -0.56 * S) * angles(-6, -12, 0) },
 			{ partType = "Normal",   size = V(0.04, 0.16, 0.04) * S, color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, relCF = C(0.38 * S, 0.26 * S, -0.58 * S) * angles(-6, -12, 16) },
 			{ partType = "Normal",   size = V(0.04, 0.16, 0.04) * S, color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, relCF = C(0.44 * S, 0.26 * S, -0.58 * S) * angles(-6, -12, -16) },
 			{ partType = "Normal",   size = V(0.11, 0.035, 0.04) * S, color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, relCF = C(0.55 * S, 0.32 * S, -0.58 * S) * angles(-6, -12, 0) },
 			{ partType = "Normal",   size = V(0.11, 0.035, 0.04) * S, color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, relCF = C(0.55 * S, 0.26 * S, -0.58 * S) * angles(-6, -12, 0) },
 			{ partType = "Normal",   size = V(0.11, 0.035, 0.04) * S, color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, relCF = C(0.55 * S, 0.20 * S, -0.58 * S) * angles(-6, -12, 0) },
-			-- Golas altas reforçadas
 			{ partType = "Wedge",    size = V(0.34, 0.38, 0.84) * S, color = PALETTE.RED_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(-0.66 * S, 0.64 * S, 0.02 * S) * angles(0, 0, -18) },
 			{ partType = "Wedge",    size = V(0.34, 0.38, 0.84) * S, color = PALETTE.RED_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0.66 * S, 0.64 * S, 0.02 * S) * angles(0, 0, 18) },
 			{ partType = "Normal",   size = V(0.92, 0.20, 0.74) * S, color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, 0.58 * S, 0.04 * S) },
@@ -159,7 +152,6 @@ return function(Core)
 		}
 	end
 
-	-- Braço Superior: Esquerdo = Knuckleblaster pesado (ombreira maior + pistão), Direito = Blindagem vermelha padrão
 	local function getV2UpperArmSpecs(isKnuckle)
 		if isKnuckle then
 			return {
@@ -179,18 +171,14 @@ return function(Core)
 		}
 	end
 
-	-- Antebraço: Esquerdo = KNUCKLEBLASTER (tubos exaustores traseiros, câmara de cartucho e blindagem pesada)
 	local function getV2ForearmSpecs(isKnuckle)
 		if isKnuckle then
 			return {
 				{ partType = "Ball",     size = V(0.36, 0.36, 0.36) * S, color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, 0, 0) },
-				-- Carcaça blindada larga vermelha do Knuckleblaster
 				{ partType = "Normal",   size = V(0.60, 0.88, 0.62) * S, color = PALETTE.RED_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.48 * S, 0) },
 				{ partType = "Normal",   size = V(0.64, 0.32, 0.66) * S, color = PALETTE.DEEP_RED_ARMOR, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.78 * S, -0.02 * S) },
-				-- Abertura escura da câmara de cápsula de escopeta + cápsula laranja/vermelha
 				{ partType = "Normal",   size = V(0.26, 0.42, 0.14) * S, color = PALETTE.BLACK_TRIM, mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.44 * S, -0.28 * S) },
 				{ partType = "Cylinder", size = V(0.34, 0.12, 0.12) * S, color = PALETTE.SHOTGUN_ORANGE, mat = Enum.Material.Neon, relCF = C(0, -0.44 * S, -0.32 * S) * angles(0, 0, 90), knuckleShell = true },
-				-- Exaustores duplos inclinados saindo atrás do cotovelo (idêntico à imagem)
 				{ partType = "Cylinder", size = V(0.56, 0.16, 0.16) * S, color = PALETTE.GUN_STEEL, mat = Enum.Material.Metal, relCF = C(-0.14 * S, -0.18 * S, 0.38 * S) * angles(52, 0, 0) },
 				{ partType = "Cylinder", size = V(0.56, 0.16, 0.16) * S, color = PALETTE.GUN_STEEL, mat = Enum.Material.Metal, relCF = C(0.14 * S, -0.18 * S, 0.38 * S) * angles(52, 0, 0) },
 				{ partType = "Cylinder", size = V(0.12, 0.12, 0.12) * S, color = PALETTE.BLACK_TRIM, mat = Enum.Material.Metal, relCF = C(-0.14 * S, -0.02 * S, 0.56 * S) * angles(52, 0, 0) },
@@ -205,22 +193,17 @@ return function(Core)
 		}
 	end
 
-	-- Mão: Esquerda = KNUCKLEBLASTER (suporte cinza nas costas da mão, canos duplos nos nós e 3 garras grossas)
 	local function getV2HandSpecs(isKnuckle)
 		if isKnuckle then
 			return {
-				-- Base da mão e placa metálica dorsal
 				{ partType = "Normal",   size = V(0.52, 0.38, 0.54) * S, color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0, -0.18 * S, 0) },
 				{ partType = "Normal",   size = V(0.58, 0.24, 0.58) * S, color = PALETTE.GUN_STEEL, mat = Enum.Material.Metal, relCF = C(0, -0.34 * S, -0.02 * S) },
-				-- Canos duplos de impacto no punho
 				{ partType = "Cylinder", size = V(0.34, 0.16, 0.16) * S, color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, relCF = C(-0.15 * S, -0.34 * S, -0.32 * S) * angles(0, 90, 0) },
 				{ partType = "Cylinder", size = V(0.34, 0.16, 0.16) * S, color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, relCF = C(0.15 * S, -0.34 * S, -0.32 * S) * angles(0, 90, 0) },
 				{ partType = "Normal",   size = V(0.24, 0.12, 0.10) * S, color = PALETTE.KNUCKLE_BLAST, mat = Enum.Material.Neon, relCF = C(0, -0.34 * S, -0.38 * S), knuckleGlow = true },
-				-- 3 Garras pesadas curvas
 				{ partType = "Wedge",    size = V(0.13, 0.44, 0.22) * S, color = PALETTE.GUN_STEEL, mat = Enum.Material.Metal, relCF = C(-0.18 * S, -0.60 * S, -0.08 * S) * angles(165, 0, 0) },
 				{ partType = "Wedge",    size = V(0.14, 0.48, 0.22) * S, color = PALETTE.GUN_STEEL, mat = Enum.Material.Metal, relCF = C(0, -0.62 * S, -0.10 * S) * angles(165, 0, 0) },
 				{ partType = "Wedge",    size = V(0.13, 0.44, 0.22) * S, color = PALETTE.GUN_STEEL, mat = Enum.Material.Metal, relCF = C(0.18 * S, -0.60 * S, -0.08 * S) * angles(165, 0, 0) },
-				-- Polegar mecânico lateral
 				{ partType = "Wedge",    size = V(0.14, 0.34, 0.18) * S, color = PALETTE.DARK_METAL, mat = Enum.Material.Metal, relCF = C(0.28 * S, -0.42 * S, -0.14 * S) * angles(140, 0, -24) },
 			}
 		end
@@ -262,7 +245,6 @@ return function(Core)
 		}
 	end
 
-	-- Arma 1 do V2: Piercer Revolver (azul/ciano no trilho de carga)
 	local function getPiercerGunSpecs()
 		return {
 			{ partType = "Normal",   size = V(0.19, 0.25, 0.50) * S, color = PALETTE.BLACK_TRIM,   mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.24 * S, 0.04 * S) * angles(-16, 0, 0) },
@@ -278,18 +260,14 @@ return function(Core)
 		}
 	end
 
-	-- Arma 2 do V2: Core Eject Shotgun (cano duplo grosso + bobina laranja térmica)
 	local function getShotgunSpecs()
 		return {
 			{ partType = "Normal",   size = V(0.20, 0.26, 0.50) * S, color = PALETTE.BLACK_TRIM,     mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.24 * S, 0.04 * S) * angles(-14, 0, 0) },
 			{ partType = "Normal",   size = V(0.32, 0.74, 0.36) * S, color = PALETTE.DARK_METAL,     mat = Enum.Material.Metal,         relCF = C(0, -0.58 * S, -0.16 * S) },
 			{ partType = "Normal",   size = V(0.35, 0.42, 0.18) * S, color = PALETTE.RED_ARMOR,      mat = Enum.Material.SmoothPlastic, relCF = C(0, -0.62 * S, -0.36 * S) },
-			-- Canos duplos lado a lado
 			{ partType = "Cylinder", size = V(0.96, 0.16, 0.16) * S, color = PALETTE.GUN_STEEL,      mat = Enum.Material.Metal,         relCF = C(-0.09 * S, -1.36 * S, -0.28 * S) * angles(0, 0, 90) },
 			{ partType = "Cylinder", size = V(0.96, 0.16, 0.16) * S, color = PALETTE.GUN_STEEL,      mat = Enum.Material.Metal,         relCF = C(0.09 * S, -1.36 * S, -0.28 * S) * angles(0, 0, 90) },
-			-- Pump inferior largo
 			{ partType = "Normal",   size = V(0.28, 0.62, 0.16) * S, color = PALETTE.BLACK_TRIM,     mat = Enum.Material.SmoothPlastic, relCF = C(0, -1.24 * S, -0.12 * S) },
-			-- Núcleo térmico laranja lateral + visor superior
 			{ partType = "Normal",   size = V(0.36, 0.50, 0.10) * S, color = PALETTE.SHOTGUN_ORANGE, mat = Enum.Material.Neon,          relCF = C(0, -1.20 * S, -0.28 * S), gunNeon = true },
 			{ partType = "Normal",   size = V(0.16, 0.10, 0.08) * S, color = PALETTE.SHOTGUN_ORANGE, mat = Enum.Material.Neon,          relCF = C(0, -0.32 * S, -0.40 * S), gunNeon = true },
 		}
@@ -339,7 +317,7 @@ return function(Core)
 	end
 
 	-------------------------------------------------------------------
-	-- MÓDULO EXPORTADO PARA O CORE
+	-- MÓDULO EXPORTADO PARA O CORE (V2 = MAIS PESADO E PUNCHY NO AR)
 	-------------------------------------------------------------------
 	Core.start({
 		id = "v2",
@@ -350,7 +328,21 @@ return function(Core)
 			SCALE = S,
 			SOLE_DEPTH = V2_SOLE_DEPTH,
 			WALK_SPEED = 17,
-			SPRINT_SPEED = 34,
+			SPRINT_SPEED = 35,
+			ENABLE_AIR_MOVEMENT = true,
+			JUMP_POWER = 52,
+			AIR_GRAVITY_CANCEL = 0.30,
+			GLIDE_GRAVITY_CANCEL = 0.56,
+			GLIDE_MAX_FALL = 20,
+			AIR_STRAFE_ACCEL = 44,
+			AIR_DRAG = 0.36,
+			DASH_JUMP_MULT = 0.96,
+			WALL_JUMP_ENABLED = true,
+			MAX_WALL_JUMPS = 3,
+			WALL_JUMP_UP = 56,
+			WALL_JUMP_PUSH = 48,
+			SLAM_SPEED = 114,
+			SLAM_STORAGE_JUMP = 116,
 			HUD_UNIT_HEADER = "V2 // CLAIR DE LUNE UNIT",
 			HUD_WEAPON_TITLE = "PIERCER REVOLVER",
 			HUD_WEAPON_COLOR = PALETTE.PIERCER_BLUE,
@@ -366,7 +358,7 @@ return function(Core)
 
 		initState = function()
 			local STATE = Core.getState()
-			STATE.custom.weapon = "piercer" -- "piercer" | "shotgun"
+			STATE.custom.weapon = "piercer"
 			STATE.custom.fireAttack = { active = false, lastUsed = 0, startTime = 0, weapon = "piercer" }
 			STATE.custom.knuckleAttack = { active = false, lastUsed = 0, startTime = 0, hitTriggered = false, blastTriggered = false }
 			STATE.custom.enragedUntil = 0
@@ -576,6 +568,11 @@ return function(Core)
 			if STATE.slide.active and not isAir then
 				torsoY -= 1.50
 				torsoPitch = 38
+			elseif STATE.slam.active and isAir then
+				torsoPitch = -24
+				torsoRoll = 0
+			elseif STATE.isGliding and isAir then
+				torsoPitch -= 8
 			end
 
 			local dashTilt, dashRoll = 0, 0
@@ -603,19 +600,35 @@ return function(Core)
 			local lAnkleRX = 4 + (sinW * 14 * STATE.walkBlend)
 			local rAnkleRX = 4 - (sinW * 14 * STATE.walkBlend)
 
-			if STATE.slide.active then
+			if STATE.slide.active and not isAir then
 				lHipRX, rHipRX = 64, -18
 				lHipRZ, rHipRZ = -8, 12
 				lKneeRX, rKneeRX = -18, -74
 				lAnkleRX, rAnkleRX = -24, 18
 			elseif STATE.airBlend > 0.01 then
-				local riseT = clamp((STATE.vertVel + 16) / 40, 0, 1)
-				lHipRX = lerp(lHipRX, lerp(22, 42, riseT), STATE.airBlend)
-				rHipRX = lerp(rHipRX, lerp(-16, -28, riseT), STATE.airBlend)
-				lHipRZ, rHipRZ = lerp(lHipRZ, -8, STATE.airBlend), lerp(rHipRZ, 8, STATE.airBlend)
-				lKneeRX = lerp(lKneeRX, lerp(-32, -74, riseT), STATE.airBlend)
-				rKneeRX = lerp(rKneeRX, lerp(-20, -48, riseT), STATE.airBlend)
-				lAnkleRX, rAnkleRX = lerp(lAnkleRX, 24, STATE.airBlend), lerp(rAnkleRX, 18, STATE.airBlend)
+				if STATE.slam.active then
+					lHipRX = lerp(lHipRX, 64, STATE.airBlend)
+					rHipRX = lerp(rHipRX, 70, STATE.airBlend)
+					lHipRZ, rHipRZ = lerp(lHipRZ, -6, STATE.airBlend), lerp(rHipRZ, 6, STATE.airBlend)
+					lKneeRX = lerp(lKneeRX, -98, STATE.airBlend)
+					rKneeRX = lerp(rKneeRX, -106, STATE.airBlend)
+					lAnkleRX, rAnkleRX = lerp(lAnkleRX, 28, STATE.airBlend), lerp(rAnkleRX, 28, STATE.airBlend)
+				elseif STATE.isGliding then
+					lHipRX = lerp(lHipRX, 16, STATE.airBlend)
+					rHipRX = lerp(rHipRX, 26, STATE.airBlend)
+					lHipRZ, rHipRZ = lerp(lHipRZ, -10, STATE.airBlend), lerp(rHipRZ, 10, STATE.airBlend)
+					lKneeRX = lerp(lKneeRX, -26, STATE.airBlend)
+					rKneeRX = lerp(rKneeRX, -44, STATE.airBlend)
+					lAnkleRX, rAnkleRX = lerp(lAnkleRX, 22, STATE.airBlend), lerp(rAnkleRX, 22, STATE.airBlend)
+				else
+					local riseT = clamp((STATE.vertVel + 16) / 40, 0, 1)
+					lHipRX = lerp(lHipRX, lerp(22, 42, riseT), STATE.airBlend)
+					rHipRX = lerp(rHipRX, lerp(-16, -28, riseT), STATE.airBlend)
+					lHipRZ, rHipRZ = lerp(lHipRZ, -8, STATE.airBlend), lerp(rHipRZ, 8, STATE.airBlend)
+					lKneeRX = lerp(lKneeRX, lerp(-32, -74, riseT), STATE.airBlend)
+					rKneeRX = lerp(rKneeRX, lerp(-20, -48, riseT), STATE.airBlend)
+					lAnkleRX, rAnkleRX = lerp(lAnkleRX, 24, STATE.airBlend), lerp(rAnkleRX, 18, STATE.airBlend)
+				end
 			end
 
 			local lArmRX = (-14 + math.sin(t * 2.5 + 0.5) * 3.5) * idleWeight - (sinW * (26 + STATE.sprintBlend * 24) * STATE.walkBlend)
@@ -630,7 +643,13 @@ return function(Core)
 			local rWristRX, rWristRY, rWristRZ = 0, 0, 0
 			local torsoYawMod = 0
 
-			-- Animação do Knuckleblaster ([F]): soco pesado + onda explosiva AoE no impacto
+			if STATE.isGliding and isAir then
+				lArmRX, lArmRZ, lElbowRX = -16, -42, 16
+			elseif STATE.slam.active and isAir then
+				lArmRX, lArmRZ, lElbowRX = 48, -12, 64
+				rArmRX, rElbowRX = 54 + camPitch * 0.4, 58
+			end
+
 			local ka = STATE.custom.knuckleAttack
 			if ka.active then
 				local el = now - ka.startTime
@@ -669,7 +688,6 @@ return function(Core)
 						end
 					end
 				elseif el < 0.56 then
-					-- Recarga do Knuckleblaster (puxa o braço e ejeta a cápsula)
 					local k = easeOutQuad((el - 0.30) / 0.26)
 					lArmRX, lArmRY, lArmRZ = lerp(102, lArmRX, k), lerp(-16, lArmRY, k), lerp(8, lArmRZ, k)
 					torsoYawMod += 36 * (1 - k)
@@ -682,7 +700,6 @@ return function(Core)
 				end
 			end
 
-			-- Recoil da arma direita ([E])
 			local fa = STATE.custom.fireAttack
 			if fa.active then
 				local el = now - fa.startTime
@@ -799,7 +816,6 @@ return function(Core)
 				end
 			end
 
-			-- Alternância limpa entre Piercer Revolver e Core Eject Shotgun
 			local gunRoot = wristRCF * GUN_MOUNT_REL
 			STATE.custom.lastGunRoot = gunRoot
 			local gunHide = (inFP and not STATE.fpArms) and 1 or 0
@@ -839,11 +855,10 @@ return function(Core)
 				end
 			end
 
-			-- Cor dinâmica das 8 asas do V2 (estilo Clair de Lune)
 			local wantedKey, wantedCol = "GOLD", PALETTE.GOLD_WING
-			if now < STATE.custom.enragedUntil then
+			if now < STATE.custom.enragedUntil or (STATE.slam.active and isAir) then
 				wantedKey, wantedCol = "RED", PALETTE.RED_WING
-			elseif STATE.dash.active or STATE.slide.active or isAir then
+			elseif STATE.dash.active or STATE.slide.active or STATE.isGliding or isAir then
 				wantedKey, wantedCol = "GREEN", PALETTE.GREEN_WING
 			elseif math.abs(STATE.localStrafe) > 0.45 then
 				wantedKey, wantedCol = "BLUE", PALETTE.BLUE_WING
@@ -863,13 +878,17 @@ return function(Core)
 			end
 
 			local baseFan = { 48, 18, -14, -46 }
-			local flare = STATE.sprintBlend * 16 + STATE.airBlend * 22 + (ka.active and 16 or 0) + (fa.active and 10 or 0)
-			local sweepBack = 24 + STATE.walkBlend * 10 + STATE.sprintBlend * 24 + STATE.airBlend * 12 + (STATE.dash.active and 32 or 0)
+			local glideFlare = (STATE.isGliding and isAir) and 26 or 0
+			local slamFold = (STATE.slam.active and isAir) and -18 or 0
+			local flare = STATE.sprintBlend * 16 + STATE.airBlend * 22 + glideFlare + slamFold + (ka.active and 16 or 0) + (fa.active and 10 or 0)
+			local sweepBack = 24 + STATE.walkBlend * 10 + STATE.sprintBlend * 24 + STATE.airBlend * 12 + (STATE.dash.active and 32 or 0) + ((STATE.isGliding and isAir) and -12 or 0) + ((STATE.slam.active and isAir) and 22 or 0)
 			local wingRoots = {}
 			for _, side in ipairs({ -1, 1 }) do
 				wingRoots[side] = {}
 				for idx = 1, 4 do
-					local breath = math.sin(STATE.time * 2.8 - idx * 0.45) * (3.0 + STATE.walkBlend * 2.5)
+					local breath = (STATE.isGliding and isAir)
+						and (math.sin(STATE.time * 22 - idx * 0.45) * 4.5)
+						or (math.sin(STATE.time * 2.8 - idx * 0.45) * (3.0 + STATE.walkBlend * 2.5))
 					wingRoots[side][idx] = chestCF * C(side * 0.38 * S, (0.50 - (idx - 1) * 0.21) * S, 0.78 * S) * angles(0, -sweepBack * side, (baseFan[idx] + flare + breath) * side)
 				end
 			end

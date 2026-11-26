@@ -1,4 +1,4 @@
--- ULTRAKILL V1 MODULE (100% MODELO ORIGINAL + MARKSMAN COIN + FEEDBACKER PARRY)
+-- ULTRAKILL V1 MODULE (100% MODELO ORIGINAL + MARKSMAN COIN + FEEDBACKER PARRY + FLOATY AIR)
 -- Carregado dinamicamente pelo loader.lua recebendo Core
 
 return function(Core)
@@ -285,6 +285,18 @@ return function(Core)
 			HUD_RENDER_NAME = "F3X_V1_3DHUD",
 			SCALE = 1.0,
 			SOLE_DEPTH = V1_SOLE_DEPTH,
+
+			-- V1 Light & Floaty Aerial Tuning
+			WALK_SPEED = 18,
+			SPRINT_SPEED = 35,
+			JUMP_POWER = 56,
+			AIR_GRAVITY_CANCEL = 0.44,
+			GLIDE_GRAVITY_CANCEL = 0.76,
+			GLIDE_MAX_FALL = 14,
+			AIR_STRAFE_ACCEL = 54,
+			AIR_DRAG = 0.24,
+			SLAM_STORAGE_JUMP = 108,
+
 			HUD_UNIT_HEADER = "V1 // BLOOD FUEL SYSTEM",
 			HUD_WEAPON_TITLE = "MARKSMAN REVOLVER",
 			HUD_WEAPON_COLOR = PALETTE.MARKSMAN_GREEN,
@@ -451,320 +463,277 @@ return function(Core)
 			local torsoY = groundOffsetY + math.sin(t * 2.6) * 0.045 * idleWeight + math.abs(sinW) * 0.14 * STATE.walkBlend * (1 + STATE.sprintBlend * 0.4) - STATE.landRecover * 0.28
 			local idleYaw = 12 * idleWeight
 			local walkTwist = cosW * (6 + STATE.sprintBlend * 7) * STATE.walkBlend
-			local torsoPitch = -STATE.localFwd * (8 + STATE.sprintBlend * 11) + (STATE.landRecover * -12) + STATE.airBlend * clamp(-STATE.vertVel * 0.35, -14, 16)
-			local torsoRoll = -STATE.localStrafe * 9 - STATE.turnRate * 1.4
+			local torsoPitch = -STATE.localFwd * (8 + STATE.sprintBlend * 11) + (STATE.landRecover * -12) + STATE.airBlend * clamp(-STATE.vertVel * 0.35, -14, 14)
+			local torsoRoll = -STATE.localStrafe * 9 - STATE.turnRate * 2.2
+			local torsoYaw = idleYaw + walkTwist
 
 			if STATE.slide.active and not isAir then
 				torsoY -= 1.35
-				torsoPitch = 38
+				torsoPitch = 36
+				torsoRoll = -STATE.localStrafe * 12
+				torsoYaw = 18
+			elseif STATE.slam.active and isAir then
+				torsoPitch = -22
+				torsoRoll = 0
+			elseif STATE.isGliding and isAir then
+				torsoPitch -= 10
 			end
 
-			local dashTilt, dashRoll = 0, 0
 			if STATE.dash.active then
-				local dEl = now - STATE.dash.startTime
-				if dEl < CONFIG.DASH_DURATION then
-					local envD = math.sin((dEl / CONFIG.DASH_DURATION) * math.pi)
-					dashTilt, dashRoll = STATE.dash.localDir.Z * 26 * envD, -STATE.dash.localDir.X * 26 * envD
-					torsoY -= 0.20 * envD
+				local dK = 1 - clamp((now - STATE.dash.startTime) / math.max(0.01, CONFIG.DASH_DURATION), 0, 1)
+				local ld = STATE.dash.localDir
+				torsoPitch += ld.Z * 26 * dK
+				torsoRoll -= ld.X * 24 * dK
+			end
+
+			local torsoCF = hrp.CFrame * C(0, torsoY, 0) * angles(torsoPitch, torsoYaw, torsoRoll)
+			local chestCF = torsoCF * C(0, V1_CHEST_OFFSET, 0)
+			local abdomenCF = torsoCF * C(0, V1_ABDOMEN_OFFSET, 0)
+			local pelvisCF = torsoCF * C(0, V1_PELVIS_OFFSET, 0)
+
+			local headPitch = camPitch * 0.85 - torsoPitch * 0.45 + math.sin(t * 2.6 + 0.5) * 2.5 * idleWeight
+			local headYaw = camYawLocal * 0.75 - torsoYaw * 0.35
+			local headCF = chestCF * C(0, 1.06, -0.06) * angles(headPitch, headYaw, -torsoRoll * 0.4)
+
+			-- Arms (Right = Marksman Revolver, Left = Feedbacker Parry / Coin Toss)
+			local rUpperPitch = 38 + camPitch * 0.72 + math.sin(t * 2.6) * 2.0 * idleWeight - sinW * 14 * STATE.walkBlend * (1 - STATE.sprintBlend * 0.5)
+			local rUpperYaw = -10 + camYawLocal * 0.45
+			local rUpperRoll = -8
+			local rForePitch = 42 + camPitch * 0.18
+
+			local lUpperPitch = -16 * idleWeight + sinW * (28 + STATE.sprintBlend * 18) * STATE.walkBlend
+			local lUpperYaw = 10 * idleWeight
+			local lUpperRoll = 12 + STATE.airBlend * 16
+			local lForePitch = 28 + math.max(0, sinW) * 22 * STATE.walkBlend + STATE.airBlend * 14
+
+			if STATE.isGliding and isAir then
+				lUpperPitch, lUpperRoll, lForePitch = -14, 38, 18
+			elseif STATE.slam.active and isAir then
+				lUpperPitch, lUpperRoll, lForePitch = 45, 10, 62
+				rUpperPitch, rForePitch = 52 + camPitch * 0.4, 58
+			end
+
+			-- Coin Toss & Ricochet / Coin-Punch Logic
+			local ca = STATE.custom.coinAttack
+			if ca.active then
+				local cEl = now - ca.startTime
+				local dtCoin = 1 / 60
+				ca.tossVel = ca.tossVel + V(0, -48 * dtCoin, 0)
+				ca.tossPos = ca.tossPos + ca.tossVel * dtCoin
+				ca.coinCF = C(ca.tossPos) * angles(cEl * 980, cEl * 420, cEl * 310)
+
+				if cEl < 0.24 then
+					local k = easeOutQuad(cEl / 0.24)
+					lUpperPitch = lerp(lUpperPitch, 86, k)
+					lForePitch = lerp(lForePitch, 18, k)
+				elseif cEl < 0.52 and not ca.shotFired then
+					ca.shotFired = true
+					local muzzleCF = (STATE.buckets.v1gun and STATE.buckets.v1gun[1] and STATE.buckets.v1gun[1].targetCF) or (chestCF * C(1.1, 0.2, -1.6))
+					local originPos = (inFP and cam) and (cam.CFrame * C(0.65, -0.35, -1.5)).Position or muzzleCF.Position
+					local fallbackPos = (cam and (cam.CFrame.Position + cam.CFrame.LookVector * 65)) or (hrp.Position + hrp.CFrame.LookVector * 65)
+					local targetPos, targetChar = findNearestCoinTarget(c, ca.tossPos, fallbackPos)
+
+					Core.playSFX("SHATTER", 1.15, 0.9, "PARRY")
+					fireRicochetBeams(STATE, originPos, ca.tossPos, targetPos, false)
+					Core.addStyleBonus("+RICOSHOT", 125, PALETTE.COIN_GOLD)
+
+					if targetChar then
+						Core.applyF3XKnockback(targetChar, targetPos - ca.tossPos, COIN_KNOCKBACK_POWER)
+					end
+					if STATE.coinPart and STATE.coinPart.part then
+						Core.syncPartMaterial({ { Part = STATE.coinPart.part, Transparency = 1 } })
+					end
+					ca.coinCF = PARK_CF
+				elseif cEl >= 0.72 then
+					ca.active = false
+					ca.coinCF = PARK_CF
+				end
+
+				if ca.shotFired and (now - ca.startTime) < 0.44 then
+					rUpperPitch += 24
+					rForePitch += 14
 				end
 			end
 
-			local headRX = math.sin(t * 2.6 - 0.6) * 2.5 * idleWeight + camPitch * 0.65 - torsoPitch * 0.5
-			local headRY = math.sin(t * 0.9) * 6.0 * idleWeight + camYawLocal * 0.65 - idleYaw * 0.5
-			local headRZ = -torsoRoll * 0.4
-
-			local lHipRX = (12 * idleWeight) + (sinW * (34 + STATE.sprintBlend * 22) * STATE.walkBlend * clamp(STATE.localFwd, -1, 1.4))
-			local rHipRX = (-14 * idleWeight) - (sinW * (34 + STATE.sprintBlend * 22) * STATE.walkBlend * clamp(STATE.localFwd, -1, 1.4))
-			local lHipRZ = (-5 * idleWeight) + (sinW * 24 * STATE.walkBlend * STATE.localStrafe)
-			local rHipRZ = (5 * idleWeight) - (sinW * 24 * STATE.walkBlend * STATE.localStrafe)
-			local lHipRY, rHipRY = 8 * idleWeight, -8 * idleWeight
-
-			local lKneeRX = -8 - math.max(0, sinW) * (36 + STATE.sprintBlend * 20) * STATE.walkBlend
-			local rKneeRX = -8 - math.max(0, -sinW) * (36 + STATE.sprintBlend * 20) * STATE.walkBlend
-			local lAnkleRX = 4 + (sinW * 14 * STATE.walkBlend)
-			local rAnkleRX = 4 - (sinW * 14 * STATE.walkBlend)
-
-			if STATE.slide.active then
-				lHipRX, rHipRX = 64, -18
-				lHipRZ, rHipRZ = -8, 12
-				lKneeRX, rKneeRX = -18, -74
-				lAnkleRX, rAnkleRX = -24, 18
-			elseif STATE.airBlend > 0.01 then
-				local riseT = clamp((STATE.vertVel + 16) / 40, 0, 1)
-				lHipRX = lerp(lHipRX, lerp(22, 42, riseT), STATE.airBlend)
-				rHipRX = lerp(rHipRX, lerp(-16, -28, riseT), STATE.airBlend)
-				lHipRZ, rHipRZ = lerp(lHipRZ, -8, STATE.airBlend), lerp(rHipRZ, 8, STATE.airBlend)
-				lKneeRX = lerp(lKneeRX, lerp(-32, -74, riseT), STATE.airBlend)
-				rKneeRX = lerp(rKneeRX, lerp(-20, -48, riseT), STATE.airBlend)
-				lAnkleRX, rAnkleRX = lerp(lAnkleRX, 24, STATE.airBlend), lerp(rAnkleRX, 18, STATE.airBlend)
+			if STATE.coinPart and STATE.coinPart.part then
+				STATE.coinPart.targetCF = ca.active and not ca.shotFired and ca.coinCF or PARK_CF
+				STATE.coinPart.part.CFrame = STATE.coinPart.targetCF
 			end
 
-			local lArmRX = (-12 + math.sin(t * 2.6 + 0.5) * 3.5) * idleWeight - (sinW * (28 + STATE.sprintBlend * 26) * STATE.walkBlend)
-			local lArmRY = 10 * idleWeight
-			local lArmRZ = (-9 - math.sin(t * 1.8) * 1.5) * idleWeight - STATE.airBlend * 28
-
-			local rArmRX = (72 + math.sin(t * 2.6) * 2.5) * idleWeight + (34 + cosW * 8) * STATE.walkBlend + (STATE.sprintBlend * 14) + camPitch * 0.7
-			local rArmRY = (-12 * idleWeight) + camYawLocal * 0.35
-			local rArmRZ = 6 * idleWeight + STATE.airBlend * 16
-			local lElbowRX, rElbowRX = 24, 18
-			local lWristRX, lWristRY, lWristRZ = 0, 0, 0
-			local rWristRX, rWristRY, rWristRZ = 0, 0, 0
-			local torsoYawMod = 0
-
+			-- Feedbacker Parry / Coin-Punch Logic
 			local pa = STATE.custom.parryAttack
-			local ca = STATE.custom.coinAttack
-
 			if pa.active then
-				local el = now - pa.startTime
-				if el < 0.08 then
-					local k = easeOutQuad(el / 0.08)
-					lArmRX, lArmRY, lArmRZ = lerp(lArmRX, -38, k), lerp(lArmRY, 25, k), lerp(lArmRZ, -22, k)
-					torsoYawMod -= 22 * k
-				elseif el < 0.24 then
-					local k = easeOutBack((el - 0.08) / 0.12)
-					lArmRX, lArmRY, lArmRZ = lerp(-38, 96, k), lerp(25, -14, k), lerp(-22, 6, k)
-					lElbowRX = lerp(lElbowRX, 8, k)
-					lWristRX = lerp(lWristRX, 16, k)
-					rArmRX = lerp(rArmRX, 18, k)
-					torsoYawMod += 32 * k
-					torsoPitch -= 12 * k
-
-					if not pa.hitTriggered and el >= 0.10 then
-						pa.hitTriggered = true
-						local fistWorld = (hrp.CFrame * C(-1.0, 0.5, -2.4)).Position
-						if ca.active and not ca.shotFired and not ca.punched then
-							ca.punched, ca.shotFired = true, true
-							local cPos = ca.coinCF.Position
-							local targetPos, targetChar = findNearestCoinTarget(c, cPos, (hrp.CFrame * C(0, 0.6, -COIN_RANGE)).Position)
-							fireRicochetBeams(STATE, fistWorld, cPos, targetPos, true)
-							Core.playSFX("PARRY", 1.0, 1.0)
-							Core.spawnFlash(cPos, PALETTE.COIN_GOLD, 1.2, 5.4, 0.24)
-							Core.triggerHitstop(0.13, PALETTE.COIN_GOLD)
-							Core.addStyleBonus("FISTFUL OF DOLLAR", 320, PALETTE.COIN_GOLD)
-							if targetChar then Core.applyF3XKnockback(targetChar, targetPos - cPos, COIN_PUNCH_KNOCKBACK_POWER) end
-						else
-							local targetChar, targetHRP = findNearestMeleeTarget(c, hrp)
-							if targetChar and targetHRP then
-								Core.playSFX("PARRY", 1.0, 1.0)
-								Core.triggerHitstop(0.10, PALETTE.PARRY_FLASH)
-								Core.spawnFlash(targetHRP.Position, PALETTE.PARRY_FLASH, 1.0, 4.8, 0.22)
-								Core.spawnShockwaveRing(targetHRP.Position, (targetHRP.Position - hrp.Position), PALETTE.PARRY_FLASH, 1.0, 6.5, 0.24)
-								Core.addStyleBonus("PARRY", 250, PALETTE.PARRY_FLASH)
-								Core.applyF3XKnockback(targetChar, targetHRP.Position - hrp.Position, PARRY_KNOCKBACK_POWER)
-							else
-								Core.playSFX("PUNCH", 1.05, 1.0, "PARRY")
-								Core.spawnFlash(fistWorld, PALETTE.PARRY_FLASH, 0.8, 3.6, 0.20)
-							end
-						end
-					end
-				elseif el < 0.36 then
-					local k = easeOutQuad((el - 0.24) / 0.12)
-					lArmRX, lArmRY, lArmRZ = lerp(96, lArmRX, k), lerp(-14, lArmRY, k), lerp(6, lArmRZ, k)
-					torsoYawMod += 32 * (1 - k)
+				local pEl = now - pa.startTime
+				if pEl < 0.14 then
+					local k = easeOutBack(pEl / 0.14)
+					lUpperPitch = lerp(-12, 92 + camPitch * 0.75, k)
+					lUpperYaw = lerp(12, -18, k)
+					lUpperRoll = lerp(14, -10, k)
+					lForePitch = lerp(42, 8, k)
+				elseif pEl < 0.38 then
+					local k = easeOutQuad((pEl - 0.14) / 0.24)
+					lUpperPitch = lerp(92 + camPitch * 0.75, -12, k)
+					lForePitch = lerp(8, 28, k)
 				else
 					pa.active = false
 				end
-			end
 
-			if ca.active and not ca.punched then
-				local el = now - ca.startTime
-				if el < 0.16 then
-					local k = easeOutQuad(el / 0.16)
-					lArmRX, lArmRZ = lerp(lArmRX, 72, k), lerp(lArmRZ, 14, k)
-				elseif el < 0.30 then
-					local k = easeOutQuad((el - 0.16) / 0.14)
-					lArmRX, lArmRZ = lerp(72, lArmRX, k), lerp(14, lArmRZ, k)
-				end
-				if el < 0.48 then
-					local aimK = easeOutQuad(el / 0.28)
-					rArmRX, rArmRY, rArmRZ = lerp(rArmRX, 102 + camPitch * 0.65, aimK), lerp(rArmRY, 12, aimK), lerp(rArmRZ, -6, aimK)
-					rElbowRX = lerp(rElbowRX, 12, aimK)
-					rWristRX = lerp(rWristRX, 18, aimK)
-				elseif el < 0.68 then
-					local rec = (el < 0.58) and (32 * easeOutQuad((el - 0.48) / 0.10)) or (32 * (1 - easeOutQuad((el - 0.58) / 0.10)))
-					rArmRX, rArmRY = 102 + camPitch * 0.65 + rec, 12
-				end
-			end
-
-			local torsoCF = hrp.CFrame * C(0, torsoY, 0) * angles(torsoPitch + dashTilt, idleYaw + walkTwist + torsoYawMod, torsoRoll + dashRoll)
-			local chestCF = torsoCF * C(0, V1_CHEST_OFFSET, 0)
-			local abdomenCF = torsoCF * C(0, V1_ABDOMEN_OFFSET, 0) * angles(torsoPitch * 0.3, -walkTwist * 0.35, torsoRoll * 0.25)
-			local pelvisCF = torsoCF * C(0, V1_PELVIS_OFFSET, 0) * angles(-torsoPitch * 0.18, 0, -torsoRoll * 0.35)
-
-			local shoulderLCF = chestCF * C(-1.06, 0.24, 0) * angles(lArmRX, lArmRY, lArmRZ)
-			local shoulderRCF = chestCF * C(1.06, 0.24, 0) * angles(rArmRX, rArmRY, rArmRZ)
-			local elbowLCF = shoulderLCF * C(0, -V1_UPPER_ARM_LEN, 0) * angles(lElbowRX, 0, 0)
-			local elbowRCF = shoulderRCF * C(0, -V1_UPPER_ARM_LEN, 0) * angles(rElbowRX, 0, 0)
-			local wristLCF = elbowLCF * C(0, -V1_FOREARM_LEN, 0) * angles(lWristRX, lWristRY, lWristRZ)
-			local wristRCF = elbowRCF * C(0, -V1_FOREARM_LEN, 0) * angles(rWristRX, rWristRY, rWristRZ)
-
-			local hipLCF = pelvisCF * C(-0.46, V1_HIP_Y, 0) * angles(lHipRX, lHipRY, lHipRZ)
-			local hipRCF = pelvisCF * C(0.46, V1_HIP_Y, 0) * angles(rHipRX, rHipRY, rHipRZ)
-			local kneeLCF = hipLCF * C(0, -V1_THIGH_LEN, 0) * angles(lKneeRX, 0, 0)
-			local kneeRCF = hipRCF * C(0, -V1_THIGH_LEN, 0) * angles(rKneeRX, 0, 0)
-			local ankleLCF = kneeLCF * C(0, -V1_SHIN_LEN, 0) * angles(lAnkleRX, 0, 0)
-			local ankleRCF = kneeRCF * C(0, -V1_SHIN_LEN, 0) * angles(rAnkleRX, 0, 0)
-
-			if inFP and cam and STATE.fpArms then
-				local bobX = cosW * 0.03 * STATE.walkBlend
-				local bobY = math.abs(sinW) * 0.04 * STATE.walkBlend
-				local fpRecoil = 0
-				if ca.active and not ca.punched then
-					local el = now - ca.startTime
-					if el >= 0.48 and el < 0.68 then
-						fpRecoil = (el < 0.58) and (30 * easeOutQuad((el - 0.48) / 0.10)) or (30 * (1 - easeOutQuad((el - 0.58) / 0.10)))
+				if not pa.hitTriggered and pEl >= 0.05 then
+					pa.hitTriggered = true
+					if ca.active and not ca.shotFired and (ca.tossPos - hrp.Position).Magnitude < 12 then
+						ca.shotFired = true
+						ca.punched = true
+						local fallbackPos = (cam and (cam.CFrame.Position + cam.CFrame.LookVector * 80)) or (hrp.Position + hrp.CFrame.LookVector * 80)
+						local targetPos, targetChar = findNearestCoinTarget(c, ca.tossPos, fallbackPos)
+						Core.playSFX("PARRY", 1.15, 1.0)
+						Core.triggerHitstop(0.11, PALETTE.PARRY_FLASH)
+						fireRicochetBeams(STATE, hrp.Position, ca.tossPos, targetPos, true)
+						Core.addStyleBonus("+FISTFUL OF DOLLAR", 240, PALETTE.COIN_GOLD)
+						if targetChar then
+							Core.applyF3XKnockback(targetChar, targetPos - hrp.Position, COIN_PUNCH_KNOCKBACK_POWER)
+						end
+						if STATE.coinPart and STATE.coinPart.part then
+							Core.syncPartMaterial({ { Part = STATE.coinPart.part, Transparency = 1 } })
+						end
+						ca.coinCF = PARK_CF
+					else
+						local meleeChar, meleeHRP = findNearestMeleeTarget(c, hrp)
+						if meleeChar and meleeHRP then
+							Core.playSFX("PARRY", 1.0, 1.0)
+							Core.triggerHitstop(0.10, PALETTE.PARRY_FLASH)
+							Core.spawnFlash(meleeHRP.Position, PALETTE.PARRY_FLASH, 1.2, 5.4, 0.24)
+							Core.spawnRing(meleeHRP.Position, PALETTE.PARRY_FLASH, 0.9, 6.2, 0.26)
+							Core.addStyleBonus("+PARRY", 200, PALETTE.PARRY_FLASH)
+							Core.applyF3XKnockback(meleeChar, meleeHRP.Position - hrp.Position, PARRY_KNOCKBACK_POWER)
+						else
+							Core.playSFX("PUNCH", 1.08, 0.75, "PARRY")
+						end
 					end
 				end
-				local punchReach = pa.active and math.sin(clamp((now - pa.startTime) / 0.24, 0, 1) * math.pi) * 1.15 or 0
-
-				local camBase = cam.CFrame * C(0, -0.92, 0.12)
-				shoulderRCF = camBase * C(0.42 + bobX, 0.12 - bobY, 0.22) * angles(58 + fpRecoil * 0.5, 26, -14)
-				elbowRCF = shoulderRCF * C(0, -V1_UPPER_ARM_LEN, 0) * angles(52 + fpRecoil, 0, 6)
-				wristRCF = elbowRCF * C(0, -V1_FOREARM_LEN, 0) * angles(-46 + fpRecoil * 0.4, 8, -10)
-
-				shoulderLCF = camBase * C(-0.40 - bobX, 0.10 - bobY, 0.18) * angles(62 - punchReach * 22, -24, 14)
-				elbowLCF = shoulderLCF * C(0, -V1_UPPER_ARM_LEN, 0) * angles(46 - punchReach * 30, 0, -8)
-				wristLCF = elbowLCF * C(0, -V1_FOREARM_LEN, 0) * angles(-38, -6, 10)
 			end
 
-			local J = {
-				lUpperArm = shoulderLCF, rUpperArm = shoulderRCF,
-				lForearm = elbowLCF, rForearm = elbowRCF,
-				lHand = wristLCF, rHand = wristRCF,
-				lThigh = hipLCF, rThigh = hipRCF,
-				lShin = kneeLCF, rShin = kneeRCF,
-				lFoot = ankleLCF, rFoot = ankleRCF,
+			local shoulderL = chestCF * C(-1.06, 0.24, 0)
+			local shoulderR = chestCF * C(1.06, 0.24, 0)
+			if STATE.fpArms and cam then
+				shoulderL = cam.CFrame * C(-1.05, -0.78, -0.82) * angles(-camPitch * 0.2, 0, 0)
+				shoulderR = cam.CFrame * C(1.02, -0.78, -0.85) * angles(-camPitch * 0.2, 0, 0)
+			end
+
+			local lUpperCF = shoulderL * angles(lUpperPitch, lUpperYaw, lUpperRoll)
+			local lForeCF = lUpperCF * C(0, -V1_UPPER_ARM_LEN, 0) * angles(lForePitch, 0, 0)
+			local lHandCF = lForeCF * C(0, -V1_FOREARM_LEN, 0)
+
+			local rUpperCF = shoulderR * angles(rUpperPitch, rUpperYaw, rUpperRoll)
+			local rForeCF = rUpperCF * C(0, -V1_UPPER_ARM_LEN, 0) * angles(rForePitch, 0, 0)
+			local rHandCF = rForeCF * C(0, -V1_FOREARM_LEN, 0)
+			local gunCF = rHandCF * GUN_MOUNT_REL
+
+			-- Legs (Walk/Sprint/Slide/Air/Glide/Slam)
+			local lThighP, rThighP = 8 * idleWeight, -6 * idleWeight
+			local lShinP, rShinP = -12 * idleWeight, -8 * idleWeight
+			local lFootP, rFootP = 4 * idleWeight, 14 * idleWeight
+
+			if STATE.walkBlend > 0.01 then
+				local stride = 36 + STATE.sprintBlend * 22
+				lThighP = lerp(lThighP, sinW * stride, STATE.walkBlend)
+				rThighP = lerp(rThighP, -sinW * stride, STATE.walkBlend)
+				lShinP = lerp(lShinP, -math.max(0, -cosW) * (46 + STATE.sprintBlend * 22) - 8, STATE.walkBlend)
+				rShinP = lerp(rShinP, -math.max(0, cosW) * (46 + STATE.sprintBlend * 22) - 8, STATE.walkBlend)
+				lFootP = lerp(lFootP, cosW * 16, STATE.walkBlend)
+				rFootP = lerp(rFootP, -cosW * 16, STATE.walkBlend)
+			end
+
+			if STATE.airBlend > 0.01 then
+				local airTuckL, airTuckR = 26, 44
+				local shinTuckL, shinTuckR = -38, -68
+				if STATE.slam.active then
+					airTuckL, airTuckR = 62, 68
+					shinTuckL, shinTuckR = -96, -104
+				elseif STATE.isGliding then
+					airTuckL, airTuckR = 14, 28
+					shinTuckL, shinTuckR = -24, -48
+				end
+				lThighP = lerp(lThighP, airTuckL, STATE.airBlend)
+				rThighP = lerp(rThighP, airTuckR, STATE.airBlend)
+				lShinP = lerp(lShinP, shinTuckL, STATE.airBlend)
+				rShinP = lerp(rShinP, shinTuckR, STATE.airBlend)
+			end
+
+			if STATE.slide.active and not isAir then
+				lThighP, rThighP = 68, -22
+				lShinP, rShinP = -12, -74
+				lFootP, rFootP = -24, 18
+			end
+
+			local hipL = pelvisCF * C(-0.46, V1_HIP_Y, 0)
+			local hipR = pelvisCF * C(0.46, V1_HIP_Y, 0)
+			local lThighCF = hipL * angles(lThighP, 8 * idleWeight, -4)
+			local rThighCF = hipR * angles(rThighP, -6 * idleWeight, 4)
+			local lShinCF = lThighCF * C(0, -V1_THIGH_LEN, 0) * angles(lShinP, 0, 0)
+			local rShinCF = rThighCF * C(0, -V1_THIGH_LEN, 0) * angles(rShinP, 0, 0)
+			local lFootCF = lShinCF * C(0, -V1_SHIN_LEN, 0) * angles(lFootP, 0, 0)
+			local rFootCF = rShinCF * C(0, -V1_SHIN_LEN, 0) * angles(rFootP, 0, 0)
+
+			-- Wings (Spread & Flutter on Glide, Folded on Slam)
+			local baseFan = { 48, 18, -14, -46 }
+			local wingSpread = STATE.isGliding and 1.28 or (STATE.slam.active and 0.45 or (1.0 + STATE.airBlend * 0.14 + STATE.sprintBlend * 0.10))
+			local wingSweep = STATE.isGliding and -14 or (STATE.slam.active and 36 or (-24 - STATE.sprintBlend * 14))
+			local wingFlutter = STATE.isGliding and (math.sin(now * 24) * 5.5) or (math.sin(t * 3.2) * 2.2)
+
+			local function applyBucket(bucketName, parentMap, hideInFP)
+				local list = STATE.buckets[bucketName]
+				if not list then return end
+				for _, e in ipairs(list) do
+					local baseCF = e.key and parentMap[e.key] or parentMap
+					if baseCF then
+						e.targetCF = baseCF * e.relCF
+						e.part.CFrame = e.targetCF
+						e.part.LocalTransparencyModifier = (hideInFP and inFP) and 1 or 0
+					end
+				end
+			end
+
+			applyBucket("v1head", headCF, true)
+			applyBucket("v1chest", { chest = chestCF, abdomen = abdomenCF, pelvis = pelvisCF }, true)
+			applyBucket("v1core", chestCF, true)
+			applyBucket("v1upperArm", { lUpperArm = lUpperCF, rUpperArm = rUpperCF }, not STATE.fpArms)
+			applyBucket("v1forearm", { lForearm = lForeCF, rForearm = rForeCF }, not STATE.fpArms)
+			applyBucket("v1hand", { lHand = lHandCF, rHand = rHandCF }, not STATE.fpArms)
+			applyBucket("v1thigh", { lThigh = lThighCF, rThigh = rThighCF }, true)
+			applyBucket("v1shin", { lShin = lShinCF, rShin = rShinCF }, true)
+			applyBucket("v1foot", { lFoot = lFootCF, rFoot = rFootCF }, true)
+			applyBucket("v1gun", gunCF, not STATE.fpArms)
+
+			if STATE.buckets.v1wing then
+				for _, e in ipairs(STATE.buckets.v1wing) do
+					local idx = e.wingIdx or 1
+					local fanAng = baseFan[idx] * wingSpread + wingFlutter * (idx % 2 == 0 and 1 or -1)
+					local mountCF = chestCF * C(e.side * 0.48, 0.24, 0.72) * angles(0, e.side * wingSweep, e.side * fanAng)
+					e.targetCF = mountCF * e.relCF
+					e.part.CFrame = e.targetCF
+					e.part.LocalTransparencyModifier = inFP and 1 or 0
+				end
+			end
+
+			local coinCharge = clamp((now - ca.lastUsed) / COIN_COOLDOWN, 0, 1)
+			local hudStatus = {
+				weaponTitle = "MARKSMAN REVOLVER",
+				weaponColor = PALETTE.MARKSMAN_GREEN,
+				chargeFrac = coinCharge,
+				pipColor = PALETTE.COIN_GOLD,
+				pipDimColor = Color3.fromRGB(165, 130, 32),
 			}
 
 			local cfs = {
-				chest = chestCF, abdomen = abdomenCF, pelvis = pelvisCF,
+				["Head"] = headCF,
 				["Torso"] = torsoCF,
-				["Head"] = chestCF * C(0, 1.06, -0.06) * angles(headRX, headRY, headRZ),
-				["Left Arm"] = wristLCF,
-				["Right Arm"] = wristRCF,
-				["Left Leg"] = ankleLCF,
-				["Right Leg"] = ankleRCF,
+				["Left Arm"] = lForeCF,
+				["Right Arm"] = rForeCF,
+				["Left Leg"] = lShinCF,
+				["Right Leg"] = rShinCF,
 			}
 
-			local B = STATE.buckets
-			local fpBodyHide = inFP and 1 or 0
-
-			for _, hp in ipairs(B.v1head or {}) do
-				if hp.part and hp.part.Parent then
-					hp.targetCF = cfs["Head"] * hp.relCF
-					hp.part.CFrame = hp.targetCF
-					hp.part.LocalTransparencyModifier = fpBodyHide
-				end
-			end
-
-			for _, cp in ipairs(B.v1chest or {}) do
-				if cp.part and cp.part.Parent and cfs[cp.key] then
-					cp.targetCF = cfs[cp.key] * cp.relCF
-					cp.part.CFrame = cp.targetCF
-					cp.part.LocalTransparencyModifier = fpBodyHide
-				end
-			end
-
-			for _, kind in ipairs({ "v1upperArm", "v1forearm", "v1hand", "v1thigh", "v1shin", "v1foot" }) do
-				for _, jp in ipairs(B[kind] or {}) do
-					if jp.part and jp.part.Parent and J[jp.key] then
-						jp.targetCF = J[jp.key] * jp.relCF
-						jp.part.CFrame = jp.targetCF
-						local hide = false
-						if inFP then
-							if STATE.fpArms then
-								local isArm = (jp.key == "rUpperArm" or jp.key == "rForearm" or jp.key == "rHand"
-									or jp.key == "lUpperArm" or jp.key == "lForearm" or jp.key == "lHand")
-								hide = not isArm
-							else
-								hide = true
-							end
-						end
-						jp.part.LocalTransparencyModifier = hide and 1 or 0
-					end
-				end
-			end
-
-			local gunRoot = wristRCF * GUN_MOUNT_REL
-			local coinReady = (now - ca.lastUsed) >= COIN_COOLDOWN
-			local neonCol = coinReady and PALETTE.MARKSMAN_GREEN or Color3.fromRGB(28, 70, 42)
-			local gunHide = (inFP and not STATE.fpArms) and 1 or 0
-			for _, gp in ipairs(B.v1gun or {}) do
-				if gp.part and gp.part.Parent then
-					if gp.gunNeon then gp.part.Color = neonCol end
-					gp.targetCF = gunRoot * gp.relCF
-					gp.part.CFrame = gp.targetCF
-					gp.part.LocalTransparencyModifier = gunHide
-				end
-			end
-
-			for _, cp in ipairs(B.v1core or {}) do
-				if cp.part and cp.part.Parent then
-					cp.targetCF = chestCF * cp.relCF
-					cp.part.CFrame = cp.targetCF
-					cp.part.LocalTransparencyModifier = fpBodyHide
-				end
-			end
-
-			local baseFan = { 48, 18, -14, -46 }
-			local flare = STATE.sprintBlend * 16 + STATE.airBlend * 22 + (pa.active and 14 or 0) + (ca.shotFired and not ca.beamsHidden and 10 or 0)
-			local sweepBack = 24 + STATE.walkBlend * 10 + STATE.sprintBlend * 24 + STATE.airBlend * 12 + (STATE.dash.active and 32 or 0)
-			local wingRoots = {}
-			for _, side in ipairs({ -1, 1 }) do
-				wingRoots[side] = {}
-				for idx = 1, 4 do
-					local breath = math.sin(STATE.time * 2.8 - idx * 0.45) * (3.0 + STATE.walkBlend * 2.5)
-					wingRoots[side][idx] = chestCF * C(side * 0.36, 0.50 - (idx - 1) * 0.21, 0.76) * angles(0, -sweepBack * side, (baseFan[idx] + flare + breath) * side)
-				end
-			end
-			for _, wp in ipairs(B.v1wing or {}) do
-				if wp.part and wp.part.Parent then
-					wp.targetCF = wingRoots[wp.side][wp.wingIdx] * wp.relCF
-					wp.part.CFrame = wp.targetCF
-					wp.part.LocalTransparencyModifier = fpBodyHide
-				end
-			end
-
-			if ca.active then
-				local elapsed = now - ca.startTime
-				if STATE.coinPart and STATE.coinPart.part and STATE.coinPart.part.Parent then
-					if not ca.shotFired then
-						local coinPos = ca.tossPos + ca.tossVel * elapsed + V(0, -18 * elapsed * elapsed, 0)
-						ca.coinCF = C(coinPos) * CFrame.Angles(elapsed * 26, elapsed * 16, 0)
-						STATE.coinPart.targetCF, STATE.coinPart.part.CFrame = ca.coinCF, ca.coinCF
-					end
-					if elapsed >= 0.48 and not ca.shotFired and not ca.punched then
-						ca.shotFired = true
-						local gunTip = (gunRoot * GUN_MUZZLE_LOCAL).Position
-						local cPos = ca.coinCF.Position
-						local targetPos, targetChar = findNearestCoinTarget(c, cPos, (hrp.CFrame * C(0, 0.6, -COIN_RANGE)).Position)
-						fireRicochetBeams(STATE, gunTip, cPos, targetPos, false)
-						Core.playSFX("SHATTER", 1.2, 0.9, "PARRY")
-						Core.spawnFlash(gunTip, PALETTE.YELLOW_NEON, 0.8, 3.0, 0.16)
-						Core.spawnShockwaveRing(cPos, (targetPos - cPos), PALETTE.COIN_GOLD, 0.6, 3.8, 0.20)
-						if targetChar then
-							Core.addStyleBonus("RICOSHOT", 200, PALETTE.BEAM_CYAN)
-							Core.applyF3XKnockback(targetChar, targetPos - cPos, COIN_KNOCKBACK_POWER)
-						end
-					end
-				end
-				if elapsed >= 0.66 and not ca.beamsHidden then
-					ca.beamsHidden = true
-					if STATE.coinPart and STATE.coinPart.part then
-						STATE.coinPart.targetCF, STATE.coinPart.part.CFrame = PARK_CF, PARK_CF
-						Core.syncPartMaterial({ { Part = STATE.coinPart.part, Transparency = 1 } })
-					end
-				end
-				if elapsed >= 0.78 then ca.active = false end
-			end
-
-			return {
-				weaponTitle = "MARKSMAN REVOLVER",
-				weaponColor = PALETTE.MARKSMAN_GREEN,
-				chargeFrac = clamp((now - ca.lastUsed) / COIN_COOLDOWN, 0, 1),
-				pipColor = PALETTE.COIN_GOLD,
-				pipDimColor = Color3.fromRGB(165, 130, 32),
-			}, cfs
+			return hudStatus, cfs
 		end,
 	})
 end
