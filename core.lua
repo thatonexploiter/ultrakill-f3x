@@ -1631,7 +1631,16 @@ local function driveTargetHRP(rag, torsoCF)
 	if not (targetHRP and targetHRP.Parent) then return end
 	if rag.hrpDrive == "direct" or rag.hrpDrive == "syncmove" then
 		local desiredHRP = torsoCF * (rag.rootRestCF and rag.rootRestCF:Inverse() or ID_CF)
-		driveTargetMove(targetHRP, desiredHRP, rag.hrpDrive == "syncmove")
+		if rag.directParts and #rag.directParts > 0 then
+			local skipLocal = (rag.hrpDrive == "syncmove")
+			for _, info in ipairs(rag.directParts) do
+				if info.part and info.part.Parent then
+					driveTargetMove(info.part, desiredHRP * info.relToHRP, skipLocal)
+				end
+			end
+		else
+			driveTargetMove(targetHRP, desiredHRP, rag.hrpDrive == "syncmove")
+		end
 	elseif rag.hrpDrive == "seat" and rag.seatDrivePart and rag.seatDrivePart.Parent and rag.seatRel then
 		local desiredHRP = torsoCF * (rag.rootRestCF and rag.rootRestCF:Inverse() or ID_CF)
 		driveTargetMove(rag.seatDrivePart, desiredHRP * rag.seatRel:Inverse())
@@ -1854,7 +1863,24 @@ local function runPhysicsRamAndSeat(targetChar, targetHRP, flatDir, power, rag)
 
 		if not rag.hrpDrive and not rag.noDirect and not targetHRP.Locked then
 			local origAnchor = targetHRP.Anchored
-			local okA = f3x(ep, "SyncAnchor", { { Part = targetHRP, Anchored = true } })
+			local anchorList = {}
+			local partsInfo = {}
+			for _, d in ipairs(targetChar:GetDescendants()) do
+				if d:IsA("BasePart") and not d.Locked then
+					partsInfo[#partsInfo + 1] = {
+						part = d,
+						origAnchored = d.Anchored,
+						relToHRP = targetHRP.CFrame:ToObjectSpace(d.CFrame),
+					}
+					anchorList[#anchorList + 1] = { Part = d, Anchored = true }
+				end
+			end
+			if #anchorList == 0 then
+				anchorList[1] = { Part = targetHRP, Anchored = true }
+				partsInfo[1] = { part = targetHRP, origAnchored = origAnchor, relToHRP = ID_CF }
+			end
+
+			local okA = f3x(ep, "SyncAnchor", anchorList)
 			if okA then
 				local waitStart = os.clock()
 				while not targetHRP.Anchored and (os.clock() - waitStart) < 0.18 and rag.active and not rag.restoring do
@@ -1864,14 +1890,29 @@ local function runPhysicsRamAndSeat(targetChar, targetHRP, flatDir, power, rag)
 			if okA and targetHRP.Anchored and rag.active and not rag.restoring then
 				rag.hrpDrive = "direct"
 				rag.hrpOrigAnchored = origAnchor
+				rag.directParts = partsInfo
 				local curTorso = targetChar:FindFirstChild("Torso") or targetChar:FindFirstChild("LowerTorso") or targetHRP
 				if rag.mode ~= "clone" then
 					rag.pos = curTorso.Position
 					rag.rootRestCF = targetHRP.CFrame:ToObjectSpace(curTorso.CFrame)
+					rag.standTorsoOffset = math.max(1.2, (rag.standHeight or 3.0) + rag.rootRestCF.Position.Y)
 				end
-				trackTargetMove(targetHRP, targetHRP.CFrame)
+				rag.endTime = math.max(rag.endTime, os.clock() + (rag.minDriveHold or 0.24))
+				for _, info in ipairs(partsInfo) do
+					if info.part and info.part.Parent then
+						trackTargetMove(info.part, info.part.CFrame)
+					end
+				end
 				rag.drivingSetup = false
 				return
+			else
+				local revertList = {}
+				for _, info in ipairs(partsInfo) do
+					if info.part and info.part.Parent then
+						revertList[#revertList + 1] = { Part = info.part, Anchored = info.origAnchored == true }
+					end
+				end
+				if #revertList > 0 then f3x(ep, "SyncAnchor", revertList) end
 			end
 		end
 
@@ -1935,21 +1976,47 @@ restoreTargetRagdoll = function(rag)
 	local floorY = rag.pos and sampleFloorY(rag.pos, rag.char, buildTargetRayParams(rag.char, rag)) or 0
 
 	if rag.hrp and rag.hrp.Parent then
-		if STATE then STATE.activeTargetMoves[rag.hrp] = nil end
+		if STATE then
+			STATE.activeTargetMoves[rag.hrp] = nil
+			for _, info in ipairs(rag.directParts or {}) do
+				if info.part then STATE.activeTargetMoves[info.part] = nil end
+			end
+		end
 		if rag.hrpDrive == "direct" or rag.hrpDrive == "syncmove" then
-			pcall(function()
-				rag.hrp.AssemblyLinearVelocity = V(0, 0, 0)
-				rag.hrp.AssemblyAngularVelocity = V(0, 0, 0)
-			end)
+			local parts = (rag.directParts and #rag.directParts > 0)
+				and rag.directParts
+				or { { part = rag.hrp, origAnchored = rag.hrpOrigAnchored, relToHRP = ID_CF } }
+			for _, info in ipairs(parts) do
+				if info.part and info.part.Parent then
+					pcall(function()
+						info.part.AssemblyLinearVelocity = V(0, 0, 0)
+						info.part.AssemblyAngularVelocity = V(0, 0, 0)
+					end)
+				end
+			end
 			if ep then
 				local rx, ry, rz = rag.hrp.CFrame:ToOrientation()
 				local standY = math.max(rag.hrp.Position.Y, floorY + (rag.standHeight or 3.0))
-				if math.abs(rx) > 0.35 or math.abs(rz) > 0.35 or rag.hrp.Position.Y < floorY + 1.5 then
-					local uprightCF = C(rag.hrp.Position.X, standY, rag.hrp.Position.Z) * CFrame.Angles(0, ry, 0)
-					rag.hrp.CFrame = uprightCF
-					f3x(ep, "SyncMove", { { Part = rag.hrp, CFrame = uprightCF } })
+				local needsUpright = math.abs(rx) > 0.35 or math.abs(rz) > 0.35 or rag.hrp.Position.Y < floorY + 1.5
+				local finalHRP = needsUpright
+					and (C(rag.hrp.Position.X, standY, rag.hrp.Position.Z) * CFrame.Angles(0, ry, 0))
+					or rag.hrp.CFrame
+
+				local finalMoves, unanchorList = {}, {}
+				for _, info in ipairs(parts) do
+					if info.part and info.part.Parent then
+						local finalCF = needsUpright and (finalHRP * (info.relToHRP or ID_CF)) or info.part.CFrame
+						info.part.CFrame = finalCF
+						finalMoves[#finalMoves + 1] = { Part = info.part, CFrame = finalCF }
+						unanchorList[#unanchorList + 1] = { Part = info.part, Anchored = info.origAnchored == true }
+					end
 				end
-				f3x(ep, "SyncAnchor", { { Part = rag.hrp, Anchored = rag.hrpOrigAnchored == true } })
+				if #finalMoves > 0 then
+					f3x(ep, "SyncMove", finalMoves)
+				end
+				if #unanchorList > 0 then
+					f3x(ep, "SyncAnchor", unanchorList)
+				end
 			end
 		end
 	end
@@ -2116,8 +2183,12 @@ end
 function Core.applyF3XKnockback(targetChar, dir, power)
 	if not (STATE and targetChar and targetChar.Parent) then return end
 	power = power or CONFIG.PARRY_KNOCKBACK_POWER
-	local kbDur = power.duration or CONFIG.RAGDOLL_DURATION
 	local isShortNudge = power.duration ~= nil and power.duration <= 0.30
+	local targetPlayer = Players:GetPlayerFromCharacter(targetChar)
+	local kbDur = targetPlayer
+		and math.max(power.duration or CONFIG.RAGDOLL_DURATION, 0.32)
+		or (power.duration or CONFIG.RAGDOLL_DURATION)
+	local minDriveHold = targetPlayer and 0.24 or 0.08
 
 	local flatDir = V(dir.X, 0, dir.Z)
 	flatDir = (flatDir.Magnitude < 0.01) and V(0, 0, -1) or flatDir.Unit
@@ -2126,47 +2197,65 @@ function Core.applyF3XKnockback(targetChar, dir, power)
 	local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
 	if not (targetHRP and targetHRP:IsA("BasePart")) then return end
 
+	local ep = Core.getEndpoint()
+	local isR15 = (targetHum and targetHum.RigType == Enum.HumanoidRigType.R15) or (targetChar:FindFirstChild("UpperTorso") ~= nil)
+	local torso = isR15 and targetChar:FindFirstChild("LowerTorso") or targetChar:FindFirstChild("Torso")
+	local upperTorso = isR15 and targetChar:FindFirstChild("UpperTorso") or nil
+
 	local existing = STATE.ragdollingTargets[targetChar]
 	if existing and existing.active then
 		existing.endTime = os.clock() + kbDur
+		existing.minDriveHold = minDriveHold
+		existing.isPushOnly = isShortNudge
 		existing.wallSlammed = false
 		existing.vel = flatDir * power.speed + V(0, isShortNudge and power.up or math.max(power.up, 26), 0)
 		existing.flatDir = flatDir
-		existing.angVel = V(-power.spin, (math.random() - 0.5) * 7, (math.random() - 0.5) * 7)
-		existing.pos = (existing.pos or targetHRP.Position) + V(0, isShortNudge and 0.15 or 0.9, 0)
+		existing.angVel = isShortNudge and V(0, 0, 0) or V(-power.spin, (math.random() - 0.5) * 7, (math.random() - 0.5) * 7)
+		if not isShortNudge then
+			existing.pos = (existing.pos or targetHRP.Position) + V(0, 0.9, 0)
+		end
 		if existing.mode == "npc" and not existing.hrpDrive then
 			pcall(function()
 				targetHRP.AssemblyLinearVelocity = existing.vel
 				targetHRP.AssemblyAngularVelocity = V(-power.spin, (math.random() - 0.5) * 10, (math.random() - 0.5) * 10)
 			end)
 		end
-		flashTargetDamage(targetChar, existing.cloneFlashSaved)
+		if not isShortNudge and existing.mode ~= "clone" and CONFIG.ENABLE_TARGET_RAGDOLL and CONFIG.ENABLE_FE_PROXY_RAGDOLL and ep and torso and not torso.Locked then
+			task.spawn(function()
+				local built = buildTargetProxyRig(ep, targetChar, torso, upperTorso, isR15, existing)
+				if built then flashTargetDamage(targetChar, existing.cloneFlashSaved) else flashTargetDamage(targetChar) end
+			end)
+		else
+			flashTargetDamage(targetChar, existing.cloneFlashSaved)
+		end
 		if CONFIG.ENABLE_KNOCKBACK and not existing.hrpDrive then
 			runPhysicsRamAndSeat(targetChar, targetHRP, flatDir, power, existing)
 		end
 		return
 	end
 
-	local targetPlayer = Players:GetPlayerFromCharacter(targetChar)
 	if not targetPlayer and targetHum and CONFIG.ENABLE_TARGET_RAGDOLL and not isShortNudge then
 		startNPCRagdoll(targetChar, targetHum, targetHRP, flatDir, power)
 		return
 	end
 
-	local ep = Core.getEndpoint()
-	local isR15 = (targetHum and targetHum.RigType == Enum.HumanoidRigType.R15) or (targetChar:FindFirstChild("UpperTorso") ~= nil)
-	local torso = isR15 and targetChar:FindFirstChild("LowerTorso") or targetChar:FindFirstChild("Torso")
-	local upperTorso = isR15 and targetChar:FindFirstChild("UpperTorso") or nil
+	local _, hrpYaw, _ = targetHRP.CFrame:ToOrientation()
+	local uprightRot = CFrame.Angles(0, hrpYaw, 0)
+	local rootRestCF = torso and targetHRP.CFrame:ToObjectSpace(torso.CFrame) or ID_CF
+	local standHeight = targetHum and (isR15 and (targetHum.HipHeight + targetHRP.Size.Y * 0.5) or 3.0) or 3.0
 
 	local rag = {
 		char = targetChar, hum = targetHum, hrp = targetHRP, mode = "ram", active = true, restoring = false,
-		isR15 = isR15, startTime = os.clock(), endTime = os.clock() + kbDur,
+		isR15 = isR15, isPushOnly = isShortNudge, minDriveHold = minDriveHold,
+		startTime = os.clock(), endTime = os.clock() + kbDur,
 		flatDir = flatDir, pos = (torso and torso.Position) or targetHRP.Position,
 		vel = flatDir * power.speed + V(0, power.up, 0),
-		rot = (torso and torso.CFrame.Rotation) or targetHRP.CFrame.Rotation,
-		angVel = V(-power.spin, (math.random() - 0.5) * 6, (math.random() - 0.5) * 6),
-		rootRestCF = torso and targetHRP.CFrame:ToObjectSpace(torso.CFrame) or ID_CF,
-		standHeight = targetHum and (isR15 and (targetHum.HipHeight + targetHRP.Size.Y * 0.5) or 3.0) or 3.0,
+		rot = isShortNudge and uprightRot or ((torso and torso.CFrame.Rotation) or targetHRP.CFrame.Rotation),
+		uprightRot = uprightRot,
+		angVel = isShortNudge and V(0, 0, 0) or V(-power.spin, (math.random() - 0.5) * 6, (math.random() - 0.5) * 6),
+		rootRestCF = rootRestCF,
+		standHeight = standHeight,
+		standTorsoOffset = math.max(1.2, standHeight + rootRestCF.Position.Y),
 		clones = {}, cloneFlashSaved = {}, hiddenParts = {}, hiddenDecals = {}, proxyByRole = {},
 	}
 	STATE.ragdollingTargets[targetChar] = rag
@@ -2221,28 +2310,33 @@ local function stepTargetRagdolls(dt)
 				end
 
 				local floorY = sampleFloorY(rag.pos, targetChar, rp)
-				local minY = floorY + 0.95
+				local minY = rag.isPushOnly and (floorY + (rag.standTorsoOffset or 2.8)) or (floorY + 0.95)
 				local grounded = false
 				if rag.pos.Y <= minY then
 					rag.pos = V(rag.pos.X, minY, rag.pos.Z)
 					grounded = true
-					if rag.vel.Y < -14 then
+					if not rag.isPushOnly and rag.vel.Y < -14 then
 						rag.vel = V(rag.vel.X * 0.65, math.abs(rag.vel.Y) * 0.34, rag.vel.Z * 0.65)
 						rag.angVel = rag.angVel * 0.62
 						playSFX("LAND", 0.95, 0.55, "PARRY")
 					else
-						local damp = math.max(0, 1 - dt * 8.0)
+						local dampRate = rag.isPushOnly and 3.6 or 8.0
+						local damp = math.max(0, 1 - dt * dampRate)
 						rag.vel = V(rag.vel.X * damp, 0, rag.vel.Z * damp)
 						rag.angVel = rag.angVel * math.max(0, 1 - dt * 8.5)
 					end
 				end
 
-				local dAng = rag.angVel * dt
-				rag.rot = rag.rot * CFrame.Angles(dAng.X, dAng.Y, dAng.Z)
-				if grounded and math.abs(rag.vel.Y) < 4 then
-					local fDir = V(rag.rot.LookVector.X, 0, rag.rot.LookVector.Z)
-					if fDir.Magnitude < 0.05 then fDir = rag.flatDir end
-					rag.rot = rag.rot:Lerp(C(V(0, 0, 0), fDir.Unit) * angles(-84, 0, 0), clamp(dt * 8, 0, 1))
+				if rag.isPushOnly then
+					rag.rot = rag.uprightRot or rag.rot
+				else
+					local dAng = rag.angVel * dt
+					rag.rot = rag.rot * CFrame.Angles(dAng.X, dAng.Y, dAng.Z)
+					if grounded and math.abs(rag.vel.Y) < 4 then
+						local fDir = V(rag.rot.LookVector.X, 0, rag.rot.LookVector.Z)
+						if fDir.Magnitude < 0.05 then fDir = rag.flatDir end
+						rag.rot = rag.rot:Lerp(C(V(0, 0, 0), fDir.Unit) * angles(-84, 0, 0), clamp(dt * 8, 0, 1))
+					end
 				end
 
 				local torsoCF = C(rag.pos) * rag.rot
@@ -2556,6 +2650,17 @@ local function dispatchTargetF3X(now)
 					rag.noDirect = true
 					rag.hrpDrive = nil
 					if rag.hrp then STATE.activeTargetMoves[rag.hrp] = nil end
+					local unanchorList = {}
+					for _, info in ipairs(rag.directParts or {}) do
+						if info.part then
+							STATE.activeTargetMoves[info.part] = nil
+							if info.part.Parent then
+								unanchorList[#unanchorList + 1] = { Part = info.part, Anchored = info.origAnchored == true }
+							end
+						end
+					end
+					if #unanchorList > 0 then f3x(ep, "SyncAnchor", unanchorList) end
+					rag.directParts = nil
 					runPhysicsRamAndSeat(rag.char, rag.hrp, rag.flatDir, CONFIG.PARRY_KNOCKBACK_POWER, rag)
 				end
 			end
