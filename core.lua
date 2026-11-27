@@ -1863,31 +1863,64 @@ local function runPhysicsRamAndSeat(targetChar, targetHRP, flatDir, power, rag)
 
 		if not rag.hrpDrive and not rag.noDirect and not targetHRP.Locked then
 			local origAnchor = targetHRP.Anchored
-			local anchorList = {}
-			local partsInfo = {}
-			for _, d in ipairs(targetChar:GetDescendants()) do
-				if d:IsA("BasePart") and not d.Locked then
-					partsInfo[#partsInfo + 1] = {
-						part = d,
-						origAnchored = d.Anchored,
-						relToHRP = targetHRP.CFrame:ToObjectSpace(d.CFrame),
-					}
-					anchorList[#anchorList + 1] = { Part = d, Anchored = true }
-				end
-			end
-			if #anchorList == 0 then
-				anchorList[1] = { Part = targetHRP, Anchored = true }
-				partsInfo[1] = { part = targetHRP, origAnchored = origAnchor, relToHRP = ID_CF }
-			end
-
-			local okA = f3x(ep, "SyncAnchor", anchorList)
-			if okA then
+			local okHRP = f3x(ep, "SyncAnchor", { { Part = targetHRP, Anchored = true } })
+			if okHRP then
 				local waitStart = os.clock()
 				while not targetHRP.Anchored and (os.clock() - waitStart) < 0.18 and rag.active and not rag.restoring do
 					task.wait(0.02)
 				end
 			end
-			if okA and targetHRP.Anchored and rag.active and not rag.restoring then
+			if okHRP and targetHRP.Anchored and rag.active and not rag.restoring then
+				local partsInfo = {
+					{ part = targetHRP, origAnchored = origAnchor, relToHRP = ID_CF },
+				}
+				local limbAnchorList = {}
+				local limbInfos = {}
+				for _, d in ipairs(targetChar:GetChildren()) do
+					if d:IsA("BasePart") and d ~= targetHRP and not d.Locked then
+						local info = {
+							part = d,
+							origAnchored = d.Anchored,
+							relToHRP = targetHRP.CFrame:ToObjectSpace(d.CFrame),
+						}
+						limbInfos[#limbInfos + 1] = info
+						limbAnchorList[#limbAnchorList + 1] = { Part = d, Anchored = true }
+					end
+				end
+
+				if #limbAnchorList > 0 then
+					local okLimbs = f3x(ep, "SyncAnchor", limbAnchorList)
+					if okLimbs then
+						local wLimb = os.clock()
+						local anyAnchored = false
+						while (os.clock() - wLimb) < 0.10 and rag.active and not rag.restoring do
+							for _, info in ipairs(limbInfos) do
+								if info.part.Parent and info.part.Anchored then
+									anyAnchored = true
+									break
+								end
+							end
+							if anyAnchored then break end
+							task.wait(0.02)
+						end
+						if anyAnchored then
+							for _, info in ipairs(limbInfos) do
+								if info.part.Parent and info.part.Anchored then
+									partsInfo[#partsInfo + 1] = info
+								end
+							end
+						else
+							local revertLimbs = {}
+							for _, info in ipairs(limbInfos) do
+								if info.part.Parent then
+									revertLimbs[#revertLimbs + 1] = { Part = info.part, Anchored = info.origAnchored == true }
+								end
+							end
+							if #revertLimbs > 0 then f3x(ep, "SyncAnchor", revertLimbs) end
+						end
+					end
+				end
+
 				rag.hrpDrive = "direct"
 				rag.hrpOrigAnchored = origAnchor
 				rag.directParts = partsInfo
@@ -1906,13 +1939,7 @@ local function runPhysicsRamAndSeat(targetChar, targetHRP, flatDir, power, rag)
 				rag.drivingSetup = false
 				return
 			else
-				local revertList = {}
-				for _, info in ipairs(partsInfo) do
-					if info.part and info.part.Parent then
-						revertList[#revertList + 1] = { Part = info.part, Anchored = info.origAnchored == true }
-					end
-				end
-				if #revertList > 0 then f3x(ep, "SyncAnchor", revertList) end
+				f3x(ep, "SyncAnchor", { { Part = targetHRP, Anchored = origAnchor == true } })
 			end
 		end
 
@@ -2203,12 +2230,13 @@ function Core.applyF3XKnockback(targetChar, dir, power)
 	local upperTorso = isR15 and targetChar:FindFirstChild("UpperTorso") or nil
 
 	local existing = STATE.ragdollingTargets[targetChar]
+	local pushSpeed = isShortNudge and math.max(power.speed * 1.45, 22) or power.speed
 	if existing and existing.active then
 		existing.endTime = os.clock() + kbDur
 		existing.minDriveHold = minDriveHold
 		existing.isPushOnly = isShortNudge
 		existing.wallSlammed = false
-		existing.vel = flatDir * power.speed + V(0, isShortNudge and power.up or math.max(power.up, 26), 0)
+		existing.vel = flatDir * pushSpeed + V(0, isShortNudge and power.up or math.max(power.up, 26), 0)
 		existing.flatDir = flatDir
 		existing.angVel = isShortNudge and V(0, 0, 0) or V(-power.spin, (math.random() - 0.5) * 7, (math.random() - 0.5) * 7)
 		if not isShortNudge then
@@ -2249,7 +2277,7 @@ function Core.applyF3XKnockback(targetChar, dir, power)
 		isR15 = isR15, isPushOnly = isShortNudge, minDriveHold = minDriveHold,
 		startTime = os.clock(), endTime = os.clock() + kbDur,
 		flatDir = flatDir, pos = (torso and torso.Position) or targetHRP.Position,
-		vel = flatDir * power.speed + V(0, power.up, 0),
+		vel = flatDir * pushSpeed + V(0, power.up, 0),
 		rot = isShortNudge and uprightRot or ((torso and torso.CFrame.Rotation) or targetHRP.CFrame.Rotation),
 		uprightRot = uprightRot,
 		angVel = isShortNudge and V(0, 0, 0) or V(-power.spin, (math.random() - 0.5) * 6, (math.random() - 0.5) * 6),
@@ -2320,7 +2348,7 @@ local function stepTargetRagdolls(dt)
 						rag.angVel = rag.angVel * 0.62
 						playSFX("LAND", 0.95, 0.55, "PARRY")
 					else
-						local dampRate = rag.isPushOnly and 3.6 or 8.0
+						local dampRate = rag.isPushOnly and 2.4 or 8.0
 						local damp = math.max(0, 1 - dt * dampRate)
 						rag.vel = V(rag.vel.X * damp, 0, rag.vel.Z * damp)
 						rag.angVel = rag.angVel * math.max(0, 1 - dt * 8.5)
@@ -2642,26 +2670,6 @@ local function dispatchTargetF3X(now)
 			for _, e in ipairs(sent) do
 				if e.seq > e.block.ackSeq then
 					e.block.ackSeq, e.block.serverCF = e.seq, e.cf
-				end
-			end
-		else
-			for _, rag in pairs(STATE.ragdollingTargets) do
-				if rag.active and rag.hrpDrive == "direct" then
-					rag.noDirect = true
-					rag.hrpDrive = nil
-					if rag.hrp then STATE.activeTargetMoves[rag.hrp] = nil end
-					local unanchorList = {}
-					for _, info in ipairs(rag.directParts or {}) do
-						if info.part then
-							STATE.activeTargetMoves[info.part] = nil
-							if info.part.Parent then
-								unanchorList[#unanchorList + 1] = { Part = info.part, Anchored = info.origAnchored == true }
-							end
-						end
-					end
-					if #unanchorList > 0 then f3x(ep, "SyncAnchor", unanchorList) end
-					rag.directParts = nil
-					runPhysicsRamAndSeat(rag.char, rag.hrp, rag.flatDir, CONFIG.PARRY_KNOCKBACK_POWER, rag)
 				end
 			end
 		end
