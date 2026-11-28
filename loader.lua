@@ -533,6 +533,242 @@ BootBarFill.ZIndex = 32
 BootBarFill.Parent = BootBarTrack
 
 -- ============================================================================
+-- SMILEOS 2.0 STARTUP NOTICE POPUP ("warning, for skids.")
+-- ============================================================================
+local function showStartupNotice()
+	if not terminalAlive or not ScreenGui or not ScreenGui.Parent then return end
+
+	local NOTICE_W, NOTICE_H = 400, 224
+	local function computeNoticeScale()
+		local vp = getScreenSize(ScreenGui)
+		local isCompact = UserInputService.TouchEnabled or vp.X < 760 or vp.Y < 540
+		local fitScale = math.min((vp.X - 24) / NOTICE_W, (vp.Y - 24) / NOTICE_H)
+		if isCompact then
+			return math.clamp(fitScale, 0.52, 0.86)
+		end
+		return math.clamp(fitScale, 0.70, 1.0)
+	end
+
+	local noticeScaleVal = computeNoticeScale()
+	local vp = getScreenSize(ScreenGui)
+
+	local NoticeFrame = Instance.new("Frame")
+	NoticeFrame.Name = "SkidWarningNotice"
+	NoticeFrame.Size = UDim2.fromOffset(NOTICE_W, 28)
+	NoticeFrame.Position = UDim2.fromOffset(
+		math.max(0, math.floor((vp.X - NOTICE_W * noticeScaleVal) * 0.5)),
+		math.max(0, math.floor((vp.Y - NOTICE_H * noticeScaleVal) * 0.5))
+	)
+	NoticeFrame.BackgroundColor3 = SMILE.WinFace
+	NoticeFrame.BorderSizePixel = 0
+	NoticeFrame.Active = true
+	NoticeFrame.ClipsDescendants = true
+	NoticeFrame.ZIndex = 60
+	NoticeFrame.Parent = ScreenGui
+
+	local NoticeScale = Instance.new("UIScale")
+	NoticeScale.Scale = noticeScaleVal
+	NoticeScale.Parent = NoticeFrame
+
+	createBevel(NoticeFrame, false, 2)
+	addOutline(NoticeFrame, SMILE.BorderOuter, 1)
+
+	trackConn(ScreenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+		if not NoticeFrame or not NoticeFrame.Parent or not NoticeScale or not NoticeScale.Parent then return end
+		NoticeScale.Scale = computeNoticeScale()
+		task.defer(function()
+			if NoticeFrame and NoticeFrame.Parent then
+				clampWindowToScreen(NoticeFrame, ScreenGui)
+			end
+		end)
+	end))
+
+	-- Crimson SmileOS 2.0 Title Bar
+	local NoticeTitleBar = Instance.new("Frame")
+	NoticeTitleBar.Name = "TitleBar"
+	NoticeTitleBar.Size = UDim2.new(1, -4, 0, 26)
+	NoticeTitleBar.Position = UDim2.fromOffset(2, 2)
+	NoticeTitleBar.BackgroundColor3 = SMILE.HeaderTop
+	NoticeTitleBar.BorderSizePixel = 0
+	NoticeTitleBar.Active = true
+	NoticeTitleBar.ZIndex = 62
+	NoticeTitleBar.Parent = NoticeFrame
+
+	local noticeGrad = Instance.new("UIGradient")
+	noticeGrad.Rotation = 90
+	noticeGrad.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(224, 58, 58)),
+		ColorSequenceKeypoint.new(0.18, SMILE.HeaderTop),
+		ColorSequenceKeypoint.new(1, SMILE.HeaderBot),
+	})
+	noticeGrad.Parent = NoticeTitleBar
+
+	createSmileyIcon(NoticeTitleBar, 18, UDim2.fromOffset(5, 4), SMILE.InsetLight, SMILE.TextDark)
+
+	local NoticeTitleText = Instance.new("TextLabel")
+	NoticeTitleText.Size = UDim2.new(1, -60, 1, 0)
+	NoticeTitleText.Position = UDim2.fromOffset(28, 0)
+	NoticeTitleText.BackgroundTransparency = 1
+	NoticeTitleText.Font = Enum.Font.GothamBold
+	NoticeTitleText.TextSize = 13
+	NoticeTitleText.TextColor3 = SMILE.TextLight
+	NoticeTitleText.TextStrokeTransparency = 0.65
+	NoticeTitleText.TextStrokeColor3 = Color3.new(0, 0, 0)
+	NoticeTitleText.TextXAlignment = Enum.TextXAlignment.Left
+	NoticeTitleText.TextTruncate = Enum.TextTruncate.AtEnd
+	NoticeTitleText.Text = "warning, for skids."
+	NoticeTitleText.ZIndex = 63
+	NoticeTitleText.Parent = NoticeTitleBar
+
+	local NoticeCloseX = Instance.new("TextButton")
+	NoticeCloseX.Size = UDim2.fromOffset(24, 20)
+	NoticeCloseX.Position = UDim2.new(1, -27, 0, 3)
+	NoticeCloseX.BackgroundColor3 = Color3.fromRGB(215, 60, 56)
+	NoticeCloseX.BorderSizePixel = 0
+	NoticeCloseX.Font = Enum.Font.GothamBold
+	NoticeCloseX.TextSize = 12
+	NoticeCloseX.TextColor3 = SMILE.TextLight
+	NoticeCloseX.Text = "X"
+	NoticeCloseX.AutoButtonColor = false
+	NoticeCloseX.ZIndex = 63
+	NoticeCloseX.Parent = NoticeTitleBar
+	local xBev = createBevel(NoticeCloseX, false, 1)
+	addOutline(NoticeCloseX, SMILE.BorderOuter, 1)
+
+	NoticeCloseX.MouseButton1Down:Connect(function() xBev.setPressed(true) end)
+	NoticeCloseX.MouseButton1Up:Connect(function() xBev.setPressed(false) end)
+	NoticeCloseX.MouseLeave:Connect(function() xBev.setPressed(false) end)
+
+	makeDraggable(NoticeTitleBar, NoticeFrame, ScreenGui)
+
+	-- Inset CRT Message Well
+	local NoticeWell = Instance.new("Frame")
+	NoticeWell.Size = UDim2.new(1, -16, 0, 138)
+	NoticeWell.Position = UDim2.fromOffset(8, 34)
+	NoticeWell.BackgroundColor3 = SMILE.InsetDark
+	NoticeWell.BorderSizePixel = 0
+	NoticeWell.ZIndex = 62
+	NoticeWell.Parent = NoticeFrame
+	createBevel(NoticeWell, true, 2)
+
+	local NoticeBodyText = Instance.new("TextLabel")
+	NoticeBodyText.Size = UDim2.new(1, -18, 0, 82)
+	NoticeBodyText.Position = UDim2.fromOffset(9, 8)
+	NoticeBodyText.BackgroundTransparency = 1
+	NoticeBodyText.Font = Enum.Font.Code
+	NoticeBodyText.TextSize = 12
+	NoticeBodyText.TextColor3 = SMILE.TextLight
+	NoticeBodyText.TextXAlignment = Enum.TextXAlignment.Left
+	NoticeBodyText.TextYAlignment = Enum.TextYAlignment.Top
+	NoticeBodyText.TextWrapped = true
+	NoticeBodyText.Text = 'Hello dear user, this script is made by WuzRERBorn on Scriptblox, the griefing hater. if you are one of those "c00lkidds gui" enjoyer, well this script is not for you, you little fucker!'
+	NoticeBodyText.ZIndex = 63
+	NoticeBodyText.Parent = NoticeWell
+
+	local NoticeSigText = Instance.new("TextLabel")
+	NoticeSigText.Size = UDim2.new(1, -18, 0, 36)
+	NoticeSigText.Position = UDim2.fromOffset(9, 94)
+	NoticeSigText.BackgroundTransparency = 1
+	NoticeSigText.Font = Enum.Font.Code
+	NoticeSigText.TextSize = 12
+	NoticeSigText.TextColor3 = Color3.fromRGB(188, 108, 255)
+	NoticeSigText.TextXAlignment = Enum.TextXAlignment.Left
+	NoticeSigText.TextYAlignment = Enum.TextYAlignment.Top
+	NoticeSigText.TextWrapped = true
+	NoticeSigText.Text = "Enjoy the script\n- Wuz"
+	NoticeSigText.ZIndex = 63
+	NoticeSigText.Parent = NoticeWell
+
+	-- Green OK Button
+	local okBaseCol = Color3.fromRGB(46, 156, 66)
+	local okHoverCol = Color3.fromRGB(62, 184, 84)
+
+	local OkBtn = Instance.new("TextButton")
+	OkBtn.Size = UDim2.fromOffset(128, 32)
+	OkBtn.Position = UDim2.new(0.5, -64, 1, -42)
+	OkBtn.BackgroundColor3 = okBaseCol
+	OkBtn.BorderSizePixel = 0
+	OkBtn.Text = ""
+	OkBtn.AutoButtonColor = false
+	OkBtn.ZIndex = 62
+	OkBtn.Parent = NoticeFrame
+
+	local okBev = createBevel(OkBtn, false, 2)
+	addOutline(OkBtn, SMILE.BorderOuter, 1)
+
+	local OkInner = Instance.new("TextLabel")
+	OkInner.Size = UDim2.fromScale(1, 1)
+	OkInner.Position = UDim2.fromOffset(0, 0)
+	OkInner.BackgroundTransparency = 1
+	OkInner.Font = Enum.Font.GothamBold
+	OkInner.TextSize = 13
+	OkInner.TextColor3 = SMILE.TextLight
+	OkInner.TextStrokeTransparency = 0.72
+	OkInner.TextStrokeColor3 = Color3.new(0, 0, 0)
+	OkInner.Text = "OK"
+	OkInner.ZIndex = 65
+	OkInner.Parent = OkBtn
+
+	OkBtn.MouseEnter:Connect(function()
+		TweenService:Create(OkBtn, TweenInfo.new(0.1), { BackgroundColor3 = okHoverCol }):Play()
+	end)
+	OkBtn.MouseLeave:Connect(function()
+		okBev.setPressed(false)
+		OkInner.Position = UDim2.fromOffset(0, 0)
+		TweenService:Create(OkBtn, TweenInfo.new(0.1), { BackgroundColor3 = okBaseCol }):Play()
+	end)
+	OkBtn.MouseButton1Down:Connect(function()
+		okBev.setPressed(true)
+		OkInner.Position = UDim2.fromOffset(1, 1)
+	end)
+	OkBtn.MouseButton1Up:Connect(function()
+		okBev.setPressed(false)
+		OkInner.Position = UDim2.fromOffset(0, 0)
+	end)
+
+	-- Opening animation
+	TweenService:Create(NoticeFrame, TweenInfo.new(0.24, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Size = UDim2.fromOffset(NOTICE_W, NOTICE_H),
+	}):Play()
+
+	local closing = false
+	local function closeNotice()
+		if closing or not NoticeFrame or not NoticeFrame.Parent then return end
+		closing = true
+		NoticeFrame.Active = false
+		OkBtn.Active = false
+		NoticeCloseX.Active = false
+
+		for _, d in ipairs(NoticeFrame:GetDescendants()) do
+			if d:IsA("TextLabel") then
+				TweenService:Create(d, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+					TextTransparency = 1,
+					TextStrokeTransparency = 1,
+				}):Play()
+			end
+		end
+
+		TweenService:Create(NoticeScale, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+			Scale = noticeScaleVal * 0.85,
+		}):Play()
+
+		local tw = TweenService:Create(NoticeFrame, TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+			Size = UDim2.fromOffset(NOTICE_W, 0),
+			BackgroundTransparency = 1,
+		})
+		tw.Completed:Connect(function()
+			if NoticeFrame and NoticeFrame.Parent then
+				NoticeFrame:Destroy()
+			end
+		end)
+		tw:Play()
+	end
+
+	OkBtn.Activated:Connect(closeNotice)
+	NoticeCloseX.Activated:Connect(closeNotice)
+end
+
+-- ============================================================================
 -- LEFT SIDEBAR: SMILEOS TERMINAL MENU LIST
 -- ============================================================================
 local Sidebar = Instance.new("Frame")
@@ -1544,6 +1780,7 @@ end)
 -- BOOT ANIMATION & INITIALIZATION
 -- ============================================================================
 selectCharacter(CHARACTERS[1], true)
+showStartupNotice()
 
 task.spawn(function()
 	TweenService:Create(MainFrame, TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
