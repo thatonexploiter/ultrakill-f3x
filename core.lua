@@ -1,5 +1,5 @@
 -- F3X / FORK3X ULTRAKILL CORE ENGINE (R6 + R15 | PC + MOBILE)
--- Motor completo compartilhado (F3X Sync com seq/ack, HUD 3D, Controles Mobile originais, Knockback 3 camadas & FE Ragdoll + Floaty Air Movement)
+-- Motor completo compartilhado (F3X Sync com seq/ack, HUD autentico estilo ULTRAKILL, Controles Mobile, Abate F3X por remocao de Torso & Movimento Aereo)
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -79,6 +79,9 @@ local Core = {
 	mirrorRelCF = mirrorRelCF,
 }
 
+-- ============================================================================
+-- CONFIGURACAO PADRAO DO MOTOR
+-- ============================================================================
 local DEFAULT_CONFIG = {
 	RENDER_NAME = "F3X_Ultrakill_Reanim",
 	HUD_RENDER_NAME = "F3X_Ultrakill_3DHUD",
@@ -103,7 +106,7 @@ local DEFAULT_CONFIG = {
 	MAX_WALL_JUMPS = 3,
 	WALL_JUMP_UP = 58,
 	WALL_JUMP_PUSH = 44,
-	WALL_DETECT_DIST = 3.6,
+	WALL_DETECT_DIST = 3.8,
 	SLAM_STORAGE_WINDOW = 0.20,
 	SLAM_STORAGE_JUMP = 108,
 
@@ -125,13 +128,13 @@ local DEFAULT_CONFIG = {
 	ENABLE_FOV_KICK = true,
 	BASE_FOV = 70,
 
-	YELLOW_NEON = Color3.fromRGB(255, 208, 30),
-	MARKSMAN_GREEN = Color3.fromRGB(75, 255, 130),
-	COIN_GOLD = Color3.fromRGB(255, 215, 45),
-	BEAM_CYAN = Color3.fromRGB(115, 235, 255),
+	YELLOW_NEON = Color3.fromRGB(255, 224, 61),
+	MARKSMAN_GREEN = Color3.fromRGB(68, 255, 68),
+	COIN_GOLD = Color3.fromRGB(255, 224, 61),
+	BEAM_CYAN = Color3.fromRGB(63, 232, 255),
 	BEAM_CORE = Color3.fromRGB(255, 255, 255),
 	PARRY_FLASH = Color3.fromRGB(255, 245, 175),
-	BLOOD_RED = Color3.fromRGB(185, 26, 32),
+	BLOOD_RED = Color3.fromRGB(210, 18, 24),
 
 	ENABLE_HEAD_AIM_TRACKING = true,
 	FOOTSTEP_SFX = true,
@@ -143,68 +146,87 @@ local DEFAULT_CONFIG = {
 	BGM_PITCH = 1.0,
 	BGM_MUTED = false,
 	ENABLE_HUD = true,
+	HUD_BG_TRANSPARENCY = 0.48,
+	SHOW_SPEEDOMETER = true,
 
-	HUD_UNIT_HEADER = "V1 // BLOOD FUEL SYSTEM",
-	HUD_WEAPON_TITLE = "MARKSMAN REVOLVER",
-	HUD_WEAPON_COLOR = Color3.fromRGB(75, 255, 130),
+	HUD_UNIT_HEADER = "V1",
+	HUD_WEAPON_TITLE = "MARKSMAN",
+	HUD_WEAPON_COLOR = Color3.fromRGB(68, 255, 68),
+	HUD_ARM_COLOR = Color3.fromRGB(48, 170, 255),
 	HUD_KEY_HINT = "[Q] DASH  [C] SLAM/SLIDE  [E] COIN  [F] PARRY",
-	HUD_PIP_COLOR = Color3.fromRGB(255, 215, 45),
+	HUD_PIP_COLOR = Color3.fromRGB(255, 224, 61),
 	MOBILE_PRIMARY_LABEL = "COIN",
-	MOBILE_PRIMARY_COLOR = Color3.fromRGB(255, 215, 45),
+	MOBILE_PRIMARY_COLOR = Color3.fromRGB(255, 224, 61),
 	MOBILE_SECONDARY_LABEL = "PARRY",
 	MOBILE_SECONDARY_COLOR = Color3.fromRGB(255, 245, 175),
 	MOBILE_TERTIARY_LABEL = "SWAP",
 	MOBILE_TERTIARY_COLOR = Color3.fromRGB(255, 185, 65),
 
 	SOUNDS = {
-		PARRY     = { id = "rbxassetid://98660468032974",  fallbackId = "rbxasset://sounds/electronicpingshort.wav",   volume = 0.95, pitch = 1.00 },
-		COIN_FLIP = { id = "rbxassetid://132653076390131", fallbackId = "rbxasset://sounds/electronicpingshort.wav",   volume = 0.75, pitch = 1.55 },
-		SHATTER   = { id = "rbxassetid://17405655409",     fallbackId = "rbxasset://sounds/snap.mp3",                  volume = 0.80, pitch = 1.15 },
-		PUNCH     = { id = "rbxassetid://140626490819228", fallbackId = "rbxasset://sounds/hit.wav",                   volume = 0.78, pitch = 1.05 },
-		DASH      = { id = "rbxassetid://6870002465",      fallbackId = "rbxasset://sounds/action_jump.mp3",           volume = 0.58, pitch = 1.15 },
-		LAND      = { id = "rbxassetid://6870001600",      fallbackId = "rbxasset://sounds/action_jump_land.mp3",      volume = 0.45, pitch = 1.10 },
+		PARRY     = { id = "rbxassetid://98660468032974",  fallbackId = "rbxasset://sounds/electronicpingshort.wav",    volume = 0.95, pitch = 1.00 },
+		COIN_FLIP = { id = "rbxassetid://132653076390131", fallbackId = "rbxasset://sounds/electronicpingshort.wav",    volume = 0.75, pitch = 1.55 },
+		SHATTER   = { id = "rbxassetid://17405655409",     fallbackId = "rbxasset://sounds/snap.mp3",                   volume = 0.80, pitch = 1.15 },
+		PUNCH     = { id = "rbxassetid://140626490819228", fallbackId = "rbxasset://sounds/hit.wav",                    volume = 0.78, pitch = 1.05 },
+		DASH      = { id = "rbxassetid://6870002465",      fallbackId = "rbxasset://sounds/action_jump.mp3",            volume = 0.58, pitch = 1.15 },
+		LAND      = { id = "rbxassetid://6870001600",      fallbackId = "rbxasset://sounds/action_jump_land.mp3",       volume = 0.45, pitch = 1.10 },
 		STEP      = { id = "rbxassetid://6870002623",      fallbackId = "rbxasset://sounds/action_footsteps_plastic.mp3", volume = 0.16, pitch = 1.65 },
 	},
 
-	MAX_CREATE_WORKERS = 18,
+	MAX_CREATE_WORKERS = 20,
 	MAX_IN_FLIGHT = 1,
 	SEND_INTERVAL = 0.055,
 	POS_EPS = 0.055,
 	ROT_EPS_DEG = 2.2,
-	SYNC_CHUNK = 100,
+	SYNC_CHUNK = 120,
 	DISABLE_FALLING_DOWN = true,
 	IDLE_TILT_GUARD = true,
 
+	-- Mantidos por compatibilidade com modulos de personagem; acoes usam abate direto por remocao de torso
 	ENABLE_KNOCKBACK = true,
-	ENABLE_SEAT_CAPTURE = true,
+	ENABLE_TORSO_KILL = true,
+	KILL_DEBOUNCE = 0.45,
+	MULTIKILL_WINDOW = 1.25,
 	PARRY_KNOCKBACK_POWER = { speed = 68, up = 32, spin = 12.0 },
 	SLAM_KNOCKBACK_POWER = { speed = 42, up = 44, spin = 11.0 },
-	WALL_SLAM_ENABLED = true,
-
 	ENABLE_DAMAGE_FLASH = true,
 	DAMAGE_FLASH_PULSE_COLOR = Color3.fromRGB(255, 145, 145),
 	DAMAGE_FLASH_COLOR = Color3.fromRGB(255, 30, 30),
 	DAMAGE_FLASH_DURATION = 0.24,
-
-	ENABLE_TARGET_RAGDOLL = true,
-	ENABLE_FE_PROXY_RAGDOLL = true,
-	RAGDOLL_DURATION = 1.75,
-	RAGDOLL_GRAVITY = 94,
 }
 
+-- Cores oficiais do HUD do ULTRAKILL
+local UK_COLOR = {
+	Health = Color3.fromRGB(255, 0, 0),
+	HealthBack = Color3.fromRGB(48, 8, 10),
+	HealthNum = Color3.fromRGB(255, 255, 255),
+	SoftDamage = Color3.fromRGB(255, 99, 0),
+	HardDamage = Color3.fromRGB(89, 89, 89),
+	Overheal = Color3.fromRGB(0, 255, 0),
+	StaminaFull = Color3.fromRGB(13, 223, 240),
+	StaminaCharge = Color3.fromRGB(3, 137, 156),
+	StaminaEmpty = Color3.fromRGB(255, 0, 0),
+	RailFull = Color3.fromRGB(63, 232, 255),
+	RailCharge = Color3.fromRGB(255, 0, 0),
+	PanelBg = Color3.new(0, 0, 0),
+	TrackBg = Color3.fromRGB(20, 20, 22),
+	TextMain = Color3.fromRGB(245, 245, 245),
+	TextDim = Color3.fromRGB(165, 170, 178),
+}
+
+-- Ranks oficiais de estilo (limites, decaimento por segundo e acelerador de Hard Damage)
 local STYLE_RANKS = {
-	{ min = 0,    max = 150,  name = "D",   title = "DESTRUCTIVE", color = Color3.fromRGB(70, 175, 255) },
-	{ min = 150,  max = 350,  name = "C",   title = "CHAOTIC",     color = Color3.fromRGB(75, 255, 130) },
-	{ min = 350,  max = 600,  name = "B",   title = "BRUTAL",      color = Color3.fromRGB(255, 215, 45) },
-	{ min = 600,  max = 950,  name = "A",   title = "ANARCHIC",    color = Color3.fromRGB(255, 140, 35) },
-	{ min = 950,  max = 1350, name = "S",   title = "SUPREME",     color = Color3.fromRGB(255, 65, 65) },
-	{ min = 1350, max = 1850, name = "SS",  title = "SSADISTIC",   color = Color3.fromRGB(255, 40, 110) },
-	{ min = 1850, max = 2450, name = "SSS", title = "SSSHITSTORM", color = Color3.fromRGB(255, 24, 24) },
-	{ min = 2450, max = 3200, name = "U",   title = "ULTRAKILL",   color = Color3.fromRGB(255, 238, 95) },
+	{ min = 0,    max = 200,  prefix = "D",         rest = "ESTRUCTIVE", decay = 15.0,  hdRate = 1.0, color = Color3.fromRGB(38, 155, 255) },
+	{ min = 200,  max = 500,  prefix = "C",         rest = "HAOTIC",     decay = 18.75, hdRate = 1.0, color = Color3.fromRGB(68, 255, 68) },
+	{ min = 500,  max = 900,  prefix = "B",         rest = "RUTAL",      decay = 22.5,  hdRate = 1.0, color = Color3.fromRGB(255, 224, 61) },
+	{ min = 900,  max = 1400, prefix = "A",         rest = "NARCHIC",    decay = 30.0,  hdRate = 1.0, color = Color3.fromRGB(255, 138, 34) },
+	{ min = 1400, max = 2100, prefix = "S",         rest = "UPREME",     decay = 45.0,  hdRate = 2.0, color = Color3.fromRGB(255, 48, 48) },
+	{ min = 2100, max = 2950, prefix = "SS",        rest = "ADISTIC",    decay = 60.0,  hdRate = 2.5, color = Color3.fromRGB(255, 34, 34) },
+	{ min = 2950, max = 3950, prefix = "SSS",       rest = "HITSTORM",   decay = 90.0,  hdRate = 3.0, color = Color3.fromRGB(255, 18, 24) },
+	{ min = 3950, max = 5450, prefix = "ULTRAKILL", rest = "",           decay = 120.0, hdRate = 99,  color = Color3.fromRGB(255, 232, 64) },
 }
 
 local STATE, CONFIG, CHAR_DEF = nil, nil, nil
-local cleanup, forceRebuild, setupRig, restoreTargetRagdoll, trackTargetMove, driveTargetMove, buildTargetRayParams
+local cleanup, forceRebuild, setupRig, buildExcludeRayParams
 
 local function getChar() return plr.Character end
 
@@ -252,7 +274,7 @@ end
 
 local function chunked(items, size)
 	if #items == 0 then return {} end
-	size = math.max(1, math.floor(size or 100))
+	size = math.max(1, math.floor(size or 120))
 	if #items <= size then return { items } end
 
 	local out = {}
@@ -269,7 +291,7 @@ end
 local function runParallelBatched(fns, maxWorkers, timeoutSec)
 	local total = #fns
 	if total == 0 then return end
-	local workers = math.min(maxWorkers or (CONFIG and CONFIG.MAX_CREATE_WORKERS) or 18, total)
+	local workers = math.min(maxWorkers or (CONFIG and CONFIG.MAX_CREATE_WORKERS) or 20, total)
 	local nextIdx, finished = 0, 0
 	local thread = coroutine.running()
 	local resumed = false
@@ -307,9 +329,9 @@ function Core.getChar() return getChar() end
 function Core.getEndpoint() return (STATE and STATE.ep and STATE.ep.Parent and STATE.ep) or getF3XEndpoint() end
 function Core.f3x(cmd, ...) return f3x(Core.getEndpoint(), cmd, ...) end
 
--------------------------------------------------------------------
--- TARGET TRACKER
--------------------------------------------------------------------
+-- ============================================================================
+-- RASTREADOR DE ALVOS (PLAYERS E NPCS)
+-- ============================================================================
 local function initTargetTracker()
 	STATE.knownHumanoids = {}
 	for _, d in ipairs(workspace:GetDescendants()) do
@@ -328,6 +350,7 @@ local function getTargetRoot(char)
 	return char:FindFirstChild("HumanoidRootPart")
 		or char:FindFirstChild("Torso")
 		or char:FindFirstChild("UpperTorso")
+		or char:FindFirstChild("LowerTorso")
 		or char:FindFirstChild("Head")
 end
 
@@ -346,9 +369,26 @@ end
 Core.getTargetRoot = getTargetRoot
 Core.getActiveTargetHumanoids = getActiveTargetHumanoids
 
--------------------------------------------------------------------
--- SONS (COM FALLBACK NATIVO rbxasset://sounds)
--------------------------------------------------------------------
+buildExcludeRayParams = function(extraChar)
+	local rp = RaycastParams.new()
+	rp.FilterType = Enum.RaycastFilterType.Exclude
+	local ignore = {}
+	local c = getChar()
+	if c then ignore[#ignore + 1] = c end
+	if extraChar and extraChar ~= c then ignore[#ignore + 1] = extraChar end
+	if STATE then
+		for _, pp in ipairs(STATE.proxyParts) do
+			if pp and pp.Parent then ignore[#ignore + 1] = pp end
+		end
+	end
+	rp.FilterDescendantsInstances = ignore
+	rp.IgnoreWater = true
+	return rp
+end
+
+-- ============================================================================
+-- SISTEMA DE AUDIO E BGM (COM FALLBACK NATIVO)
+-- ============================================================================
 local function destroySounds()
 	if not STATE then return end
 	for _, s in ipairs(STATE.activeSounds) do
@@ -490,7 +530,7 @@ local function startBGM(url, fileName, fallbackId, vol, pitch)
 
 	task.spawn(function()
 		local soundId = loadCustomAudioAsset(url, fileName, fallbackId)
-		if not soundId or soundId == "" or not STATE.alive then return end
+		if not soundId or soundId == "" or not STATE or not STATE.alive then return end
 
 		local snd = Instance.new("Sound")
 		snd.Name = "F3X_Ultrakill_BGM"
@@ -502,7 +542,7 @@ local function startBGM(url, fileName, fallbackId, vol, pitch)
 		activeBGM = snd
 
 		pcall(function() ContentProvider:PreloadAsync({ snd }) end)
-		if activeBGM == snd and STATE.alive then
+		if activeBGM == snd and STATE and STATE.alive then
 			snd:Play()
 		end
 	end)
@@ -519,9 +559,9 @@ Core.startBGM = startBGM
 Core.stopBGM = stopBGM
 Core.toggleBGMMute = toggleBGMMute
 
--------------------------------------------------------------------
--- HUD 3D DE VISOR + CONTROLES MOBILE NA FORMAÇÃO ORIGINAL
--------------------------------------------------------------------
+-- ============================================================================
+-- HUD AUTENTICO ESTILO ULTRAKILL (PAINEIS 3D + CROSSHAIR HUD + MOBILE)
+-- ============================================================================
 local function destroyHUD()
 	if CONFIG and CONFIG.HUD_RENDER_NAME then
 		pcall(function() RunService:UnbindFromRenderStep(CONFIG.HUD_RENDER_NAME) end)
@@ -553,29 +593,46 @@ local function destroyHUD()
 	if STATE then
 		STATE.hud.folder, STATE.hud.leftPart, STATE.hud.rightPart = nil, nil, nil
 		STATE.hud.leftGui, STATE.hud.rightGui, STATE.hud.crossGui, STATE.hud.mobGui = nil, nil, nil, nil
-		STATE.hud.hpFill, STATE.hud.hardDmgFill, STATE.hud.hpText, STATE.hud.speedLabel = nil, nil, nil, nil
+		STATE.hud.hpFill, STATE.hud.softDmgFill, STATE.hud.hardDmgFill, STATE.hud.overhealFill, STATE.hud.hpText = nil, nil, nil, nil, nil
+		STATE.hud.speedBox, STATE.hud.speedLabel = nil, nil
 		STATE.hud.stamBars, STATE.hud.coinPips = {}, {}
-		STATE.hud.rankBadge, STATE.hud.rankTitle, STATE.hud.rankBarFill, STATE.hud.multLabel = nil, nil, nil, nil
+		STATE.hud.railFill, STATE.hud.armBarFill, STATE.hud.armIconWrap, STATE.hud.armAccent = nil, nil, nil, nil
+		STATE.hud.rankLabel, STATE.hud.rankBarFill, STATE.hud.multLabel, STATE.hud.multBarFill, STATE.hud.freshLabel = nil, nil, nil, nil, nil
 		STATE.hud.styleFeed, STATE.hud.rightFrame, STATE.hud.hitmarker, STATE.hud.hint = nil, nil, nil, nil
-		STATE.hud.wpnTitle, STATE.hud.wpnStroke, STATE.hud.keyHint = nil, nil, nil
+		STATE.hud.wpnTitle, STATE.hud.wpnAccent, STATE.hud.wpnBox, STATE.hud.helpPanel = nil, nil, nil, nil
+		STATE.hud.crossHpFill, STATE.hud.crossSoftFill, STATE.hud.crossHardFill, STATE.hud.crossStamBars = nil, nil, nil, {}
+		STATE.hud.crossHudLeft, STATE.hud.crossHudRight = nil, nil
 		STATE.hud.styleFeedEntries = {}
 	end
+end
+
+local function triggerHUDArmPulse()
+	if not STATE then return end
+	STATE.hud.armPulseUntil = os.clock() + 0.36
+	STATE.hud.crossHudActiveUntil = os.clock() + 1.15
+end
+
+local function triggerHUDWeaponPulse()
+	if not STATE then return end
+	STATE.hud.wpnPulseUntil = os.clock() + 0.16
+	STATE.hud.crossHudActiveUntil = os.clock() + 1.15
 end
 
 local function addStyleBonus(label, pts, color)
 	if not (STATE and CONFIG and CONFIG.ENABLE_HUD) then return end
 	local h = STATE.hud
 	local gained = math.floor((pts or 100) * h.styleMult)
-	h.stylePoints = clamp(h.stylePoints + gained, 0, 3200)
-	h.styleMult = clamp(h.styleMult + 0.15, 1.0, 3.0)
+	h.stylePoints = clamp(h.stylePoints + gained, 0, STYLE_RANKS[#STYLE_RANKS].max)
 	h.stylePop = 1.0
 	h.hitmarkerUntil = os.clock() + 0.15
+
+	local cleanLabel = tostring(label):gsub("^%+*%s*", "")
 	table.insert(h.styleFeedEntries, 1, {
-		text = "+ " .. label,
-		color = color or CONFIG.YELLOW_NEON,
-		expires = os.clock() + 3.4,
+		text = "+ " .. cleanLabel,
+		color = color or UK_COLOR.TextMain,
+		expires = os.clock() + 3.2,
 	})
-	if #h.styleFeedEntries > 6 then table.remove(h.styleFeedEntries) end
+	if #h.styleFeedEntries > 7 then table.remove(h.styleFeedEntries) end
 end
 
 Core.addStyleBonus = addStyleBonus
@@ -595,25 +652,74 @@ local function makeHUDPanelPart(folder, name, size)
 	return p
 end
 
-local function addCornerBrackets(parent, color, sizePx, thick)
-	for _, cfg in ipairs({
-		{ UDim2.fromOffset(0, 0), UDim2.fromOffset(sizePx, thick) },
-		{ UDim2.fromOffset(0, 0), UDim2.fromOffset(thick, sizePx) },
-		{ UDim2.new(1, -sizePx, 0, 0), UDim2.fromOffset(sizePx, thick) },
-		{ UDim2.new(1, -thick, 0, 0), UDim2.fromOffset(thick, sizePx) },
-		{ UDim2.new(0, 0, 1, -thick), UDim2.fromOffset(sizePx, thick) },
-		{ UDim2.new(0, 0, 1, -sizePx), UDim2.fromOffset(thick, sizePx) },
-		{ UDim2.new(1, -sizePx, 1, -thick), UDim2.fromOffset(sizePx, thick) },
-		{ UDim2.new(1, -thick, 1, -sizePx), UDim2.fromOffset(thick, sizePx) },
-	}) do
-		local bar = Instance.new("Frame")
-		bar.Position = cfg[1]
-		bar.Size = cfg[2]
-		bar.BackgroundColor3 = color
-		bar.BorderSizePixel = 0
-		bar.ZIndex = 5
-		bar.Parent = parent
+local function makeUKBox(parent, size, pos, bgTrans)
+	local box = Instance.new("Frame")
+	box.Size = size
+	box.Position = pos
+	box.BackgroundColor3 = UK_COLOR.PanelBg
+	box.BackgroundTransparency = bgTrans or CONFIG.HUD_BG_TRANSPARENCY or 0.48
+	box.BorderSizePixel = 0
+	box.Parent = parent
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 4)
+	corner.Parent = box
+	return box
+end
+
+-- Constroi silhueta limpa de revolver/arma para o modulo de arma do HUD
+local function buildWeaponGlyph(parent, accentCol)
+	local wrap = Instance.new("Frame")
+	wrap.Size = UDim2.fromOffset(78, 36)
+	wrap.Position = UDim2.new(1, -88, 0, 12)
+	wrap.BackgroundTransparency = 1
+	wrap.Parent = parent
+
+	local parts = {
+		{ UDim2.fromOffset(44, 10), UDim2.fromOffset(18, 4),  0, accentCol }, -- cano superior
+		{ UDim2.fromOffset(22, 12), UDim2.fromOffset(18, 12), 0, Color3.fromRGB(228, 232, 238) }, -- tambor
+		{ UDim2.fromOffset(14, 10), UDim2.fromOffset(6, 8),   0, Color3.fromRGB(195, 200, 210) }, -- parte traseira
+		{ UDim2.fromOffset(10, 18), UDim2.fromOffset(4, 14), 16, Color3.fromRGB(180, 185, 195) }, -- cabo
+		{ UDim2.fromOffset(16, 4),  UDim2.fromOffset(44, 13), 0, accentCol }, -- trilho frontal
+	}
+	for _, p in ipairs(parts) do
+		local f = Instance.new("Frame")
+		f.Size = p[1]
+		f.Position = p[2]
+		f.Rotation = p[3]
+		f.BackgroundColor3 = p[4]
+		f.BorderSizePixel = 0
+		f.Parent = wrap
 	end
+	return wrap
+end
+
+-- Constroi icone geometrico do braco Feedbacker estilo ULTRAKILL
+local function buildArmGlyph(parent, armCol)
+	local wrap = Instance.new("Frame")
+	wrap.Size = UDim2.fromOffset(58, 76)
+	wrap.Position = UDim2.new(0.5, -29, 0, 22)
+	wrap.BackgroundTransparency = 1
+	wrap.Parent = parent
+
+	local segs = {
+		{ UDim2.fromOffset(22, 12), UDim2.fromOffset(18, 52), 0, Color3.fromRGB(45, 72, 128) }, -- pulso
+		{ UDim2.fromOffset(28, 28), UDim2.fromOffset(15, 26), 0, armCol }, -- palma/antebraco
+		{ UDim2.fromOffset(8, 18),  UDim2.fromOffset(12, 8), -8, Color3.fromRGB(125, 215, 255) }, -- dedo 1
+		{ UDim2.fromOffset(8, 22),  UDim2.fromOffset(22, 4),  0, Color3.fromRGB(125, 215, 255) }, -- dedo 2
+		{ UDim2.fromOffset(8, 20),  UDim2.fromOffset(32, 6),  4, Color3.fromRGB(125, 215, 255) }, -- dedo 3
+		{ UDim2.fromOffset(12, 8),  UDim2.fromOffset(40, 28), -22, Color3.fromRGB(95, 190, 255) }, -- polegar
+	}
+	for _, s in ipairs(segs) do
+		local f = Instance.new("Frame")
+		f.Size = s[1]
+		f.Position = s[2]
+		f.Rotation = s[3]
+		f.BackgroundColor3 = s[4]
+		f.BorderSizePixel = 0
+		f.Parent = wrap
+	end
+	return wrap
 end
 
 local function setupHUD()
@@ -628,16 +734,19 @@ local function setupHUD()
 	folder.Parent = cam
 	STATE.hud.folder = folder
 
-	local leftPart = makeHUDPanelPart(folder, "V1_HUD_Left", V(2.35, 1.24, 0.05))
-	local rightPart = makeHUDPanelPart(folder, "V1_HUD_Right", V(2.00, 1.70, 0.05))
+	local leftPart = makeHUDPanelPart(folder, "V1_HUD_Left", V(2.26, 1.32, 0.05))
+	local rightPart = makeHUDPanelPart(folder, "V1_HUD_Right", V(1.92, 1.72, 0.05))
 	STATE.hud.leftPart, STATE.hud.rightPart = leftPart, rightPart
 
+	-- ========================================================================
+	-- PAINEL ESQUERDO 3D (MODULOS SEPARADOS 50% PRETO, SEM BORDAS NEON)
+	-- ========================================================================
 	local leftGui = Instance.new("SurfaceGui")
 	leftGui.Name = "F3XV1_3DHUD_Left"
 	leftGui.Adornee = leftPart
 	leftGui.Face = Enum.NormalId.Front
 	leftGui.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
-	leftGui.CanvasSize = Vector2.new(640, 338)
+	leftGui.CanvasSize = Vector2.new(620, 362)
 	leftGui.AlwaysOnTop = true
 	leftGui.LightInfluence = 0
 	leftGui.ResetOnSpawn = false
@@ -646,221 +755,246 @@ local function setupHUD()
 
 	local lFrame = Instance.new("Frame")
 	lFrame.Size = UDim2.fromScale(1, 1)
-	lFrame.BackgroundColor3 = Color3.fromRGB(7, 10, 15)
-	lFrame.BackgroundTransparency = 0.24
+	lFrame.BackgroundTransparency = 1
 	lFrame.BorderSizePixel = 0
 	lFrame.Parent = leftGui
 
-	local lStroke = Instance.new("UIStroke")
-	lStroke.Color = Color3.fromRGB(165, 225, 255)
-	lStroke.Thickness = 3
-	lStroke.Transparency = 0.35
-	lStroke.Parent = lFrame
-	addCornerBrackets(lFrame, Color3.fromRGB(255, 255, 255), 26, 4)
+	-- 1. Caixa de Vida (Vermelho + Laranja Soft Damage + Cinza Hard Damage pela direita)
+	local hpBox = makeUKBox(lFrame, UDim2.fromOffset(620, 68), UDim2.fromOffset(0, 0))
 
-	local hdr = Instance.new("Frame")
-	hdr.Size = UDim2.new(1, -24, 0, 26)
-	hdr.Position = UDim2.fromOffset(12, 10)
-	hdr.BackgroundColor3 = Color3.fromRGB(18, 28, 42)
-	hdr.BackgroundTransparency = 0.2
-	hdr.BorderSizePixel = 0
-	hdr.Parent = lFrame
+	local hpTrack = Instance.new("Frame")
+	hpTrack.Size = UDim2.new(1, -12, 1, -12)
+	hpTrack.Position = UDim2.fromOffset(6, 6)
+	hpTrack.BackgroundColor3 = UK_COLOR.HealthBack
+	hpTrack.BorderSizePixel = 0
+	hpTrack.ClipsDescendants = true
+	hpTrack.Parent = hpBox
 
-	local hdrTxt = Instance.new("TextLabel")
-	hdrTxt.Size = UDim2.new(0.65, 0, 1, 0)
-	hdrTxt.Position = UDim2.fromOffset(10, 0)
-	hdrTxt.BackgroundTransparency = 1
-	hdrTxt.Font = Enum.Font.Code
-	hdrTxt.TextSize = 18
-	hdrTxt.TextXAlignment = Enum.TextXAlignment.Left
-	hdrTxt.TextColor3 = Color3.fromRGB(185, 225, 255)
-	hdrTxt.Text = CONFIG.HUD_UNIT_HEADER
-	hdrTxt.Parent = hdr
-
-	local spdLbl = Instance.new("TextLabel")
-	spdLbl.Size = UDim2.new(0.35, -10, 1, 0)
-	spdLbl.Position = UDim2.new(0.65, 0, 0, 0)
-	spdLbl.BackgroundTransparency = 1
-	spdLbl.Font = Enum.Font.Code
-	spdLbl.TextSize = 18
-	spdLbl.TextXAlignment = Enum.TextXAlignment.Right
-	spdLbl.TextColor3 = CONFIG.YELLOW_NEON
-	spdLbl.Text = "00 u/s"
-	spdLbl.Parent = hdr
-	STATE.hud.speedLabel = spdLbl
-
-	local hpBack = Instance.new("Frame")
-	hpBack.Size = UDim2.new(1, -24, 0, 68)
-	hpBack.Position = UDim2.fromOffset(12, 44)
-	hpBack.BackgroundColor3 = Color3.fromRGB(32, 10, 12)
-	hpBack.BorderSizePixel = 0
-	hpBack.Parent = lFrame
-
-	local hpStroke = Instance.new("UIStroke")
-	hpStroke.Color = Color3.fromRGB(255, 80, 80)
-	hpStroke.Thickness = 2
-	hpStroke.Transparency = 0.3
-	hpStroke.Parent = hpBack
-
-	local hardDmgFill = Instance.new("Frame")
-	hardDmgFill.Size = UDim2.fromScale(1, 1)
-	hardDmgFill.BackgroundColor3 = Color3.fromRGB(140, 145, 155)
-	hardDmgFill.BorderSizePixel = 0
-	hardDmgFill.ZIndex = 2
-	hardDmgFill.Parent = hpBack
-	STATE.hud.hardDmgFill = hardDmgFill
+	local softDmgFill = Instance.new("Frame")
+	softDmgFill.Size = UDim2.fromScale(1, 1)
+	softDmgFill.BackgroundColor3 = UK_COLOR.SoftDamage
+	softDmgFill.BorderSizePixel = 0
+	softDmgFill.ZIndex = 2
+	softDmgFill.Parent = hpTrack
+	STATE.hud.softDmgFill = softDmgFill
 
 	local hpFill = Instance.new("Frame")
 	hpFill.Size = UDim2.fromScale(1, 1)
-	hpFill.BackgroundColor3 = Color3.fromRGB(235, 32, 40)
+	hpFill.BackgroundColor3 = UK_COLOR.Health
 	hpFill.BorderSizePixel = 0
 	hpFill.ZIndex = 3
-	hpFill.Parent = hpBack
+	hpFill.Parent = hpTrack
 	STATE.hud.hpFill = hpFill
 
-	local hpCross = Instance.new("TextLabel")
-	hpCross.Size = UDim2.fromOffset(58, 68)
-	hpCross.Position = UDim2.fromOffset(10, 0)
-	hpCross.BackgroundTransparency = 1
-	hpCross.Font = Enum.Font.GothamBlack
-	hpCross.TextSize = 44
-	hpCross.TextColor3 = Color3.fromRGB(255, 255, 255)
-	hpCross.Text = "+"
-	hpCross.ZIndex = 4
-	hpCross.Parent = hpBack
+	local overhealFill = Instance.new("Frame")
+	overhealFill.Size = UDim2.fromScale(0, 1)
+	overhealFill.BackgroundColor3 = UK_COLOR.Overheal
+	overhealFill.BorderSizePixel = 0
+	overhealFill.Visible = false
+	overhealFill.ZIndex = 4
+	overhealFill.Parent = hpTrack
+	STATE.hud.overhealFill = overhealFill
+
+	local hardDmgFill = Instance.new("Frame")
+	hardDmgFill.AnchorPoint = Vector2.new(1, 0)
+	hardDmgFill.Position = UDim2.fromScale(1, 0)
+	hardDmgFill.Size = UDim2.fromScale(0, 1)
+	hardDmgFill.BackgroundColor3 = UK_COLOR.HardDamage
+	hardDmgFill.BorderSizePixel = 0
+	hardDmgFill.ZIndex = 5
+	hardDmgFill.Parent = hpTrack
+	STATE.hud.hardDmgFill = hardDmgFill
+
+	local hdEdge = Instance.new("Frame")
+	hdEdge.Size = UDim2.new(0, 3, 1, 0)
+	hdEdge.BackgroundColor3 = Color3.fromRGB(30, 30, 32)
+	hdEdge.BorderSizePixel = 0
+	hdEdge.ZIndex = 6
+	hdEdge.Parent = hardDmgFill
+
+	-- Cruz '+' nitida formada por retangulos
+	local crossH = Instance.new("Frame")
+	crossH.Size = UDim2.fromOffset(22, 6)
+	crossH.Position = UDim2.fromOffset(14, 25)
+	crossH.BackgroundColor3 = UK_COLOR.HealthNum
+	crossH.BorderSizePixel = 0
+	crossH.ZIndex = 7
+	crossH.Parent = hpTrack
+
+	local crossV = Instance.new("Frame")
+	crossV.Size = UDim2.fromOffset(6, 22)
+	crossV.Position = UDim2.fromOffset(22, 17)
+	crossV.BackgroundColor3 = UK_COLOR.HealthNum
+	crossV.BorderSizePixel = 0
+	crossV.ZIndex = 7
+	crossV.Parent = hpTrack
 
 	local hpText = Instance.new("TextLabel")
-	hpText.Size = UDim2.new(1, -80, 1, 0)
-	hpText.Position = UDim2.fromOffset(64, 0)
+	hpText.Size = UDim2.new(1, -56, 1, 0)
+	hpText.Position = UDim2.fromOffset(48, 0)
 	hpText.BackgroundTransparency = 1
 	hpText.Font = Enum.Font.GothamBlack
-	hpText.TextSize = 50
+	hpText.TextSize = 48
 	hpText.TextXAlignment = Enum.TextXAlignment.Left
-	hpText.TextColor3 = Color3.fromRGB(255, 255, 255)
-	hpText.TextStrokeTransparency = 0.35
+	hpText.TextColor3 = UK_COLOR.HealthNum
+	hpText.TextStrokeTransparency = 0.65
+	hpText.TextStrokeColor3 = Color3.new(0, 0, 0)
 	hpText.Text = "100"
-	hpText.ZIndex = 4
-	hpText.Parent = hpBack
+	hpText.ZIndex = 7
+	hpText.Parent = hpTrack
 	STATE.hud.hpText = hpText
 
-	local stamRow = Instance.new("Frame")
-	stamRow.Size = UDim2.new(1, -24, 0, 28)
-	stamRow.Position = UDim2.fromOffset(12, 120)
-	stamRow.BackgroundTransparency = 1
-	stamRow.Parent = lFrame
+	-- 2. Barra de Stamina (3 segmentos ciano #0ddff0 / #03899c)
+	local stamBox = makeUKBox(lFrame, UDim2.fromOffset(620, 32), UDim2.fromOffset(0, 76))
+	local segCount = math.max(1, CONFIG.MAX_STAMINA)
+	local gap = 6
+	local innerW = 620 - 12
+	local segW = (innerW - (segCount - 1) * gap) / segCount
 
-	for i = 1, CONFIG.MAX_STAMINA do
-		local segBack = Instance.new("Frame")
-		segBack.Size = UDim2.new(1 / CONFIG.MAX_STAMINA, -6, 1, 0)
-		segBack.Position = UDim2.new((i - 1) / CONFIG.MAX_STAMINA, (i - 1) * 3, 0, 0)
-		segBack.BackgroundColor3 = Color3.fromRGB(16, 30, 44)
-		segBack.BorderSizePixel = 0
-		segBack.Parent = stamRow
-
-		local segStroke = Instance.new("UIStroke")
-		segStroke.Color = Color3.fromRGB(70, 210, 255)
-		segStroke.Thickness = 2
-		segStroke.Transparency = 0.45
-		segStroke.Parent = segBack
+	for i = 1, segCount do
+		local segTrack = Instance.new("Frame")
+		segTrack.Size = UDim2.fromOffset(math.floor(segW), 20)
+		segTrack.Position = UDim2.fromOffset(6 + math.floor((i - 1) * (segW + gap)), 6)
+		segTrack.BackgroundColor3 = Color3.fromRGB(26, 14, 16)
+		segTrack.BorderSizePixel = 0
+		segTrack.Parent = stamBox
 
 		local segFill = Instance.new("Frame")
 		segFill.Size = UDim2.fromScale(1, 1)
-		segFill.BackgroundColor3 = Color3.fromRGB(45, 215, 255)
+		segFill.BackgroundColor3 = UK_COLOR.StaminaFull
 		segFill.BorderSizePixel = 0
-		segFill.Parent = segBack
+		segFill.Parent = segTrack
 		STATE.hud.stamBars[i] = segFill
 	end
 
-	local wpnBox = Instance.new("Frame")
-	wpnBox.Size = UDim2.new(1, -24, 0, 134)
-	wpnBox.Position = UDim2.fromOffset(12, 156)
-	wpnBox.BackgroundColor3 = Color3.fromRGB(12, 22, 20)
-	wpnBox.BackgroundTransparency = 0.2
-	wpnBox.BorderSizePixel = 0
-	wpnBox.Parent = lFrame
+	-- 3A. Painel da Arma (Esquerda) + 3B. Painel do Braco Feedbacker (Direita)
+	local wpnBox = makeUKBox(lFrame, UDim2.fromOffset(446, 164), UDim2.fromOffset(0, 116))
+	STATE.hud.wpnBox = wpnBox
 
-	local wpnStroke = Instance.new("UIStroke")
-	wpnStroke.Color = CONFIG.HUD_WEAPON_COLOR
-	wpnStroke.Thickness = 2
-	wpnStroke.Transparency = 0.3
-	wpnStroke.Parent = wpnBox
-	STATE.hud.wpnStroke = wpnStroke
+	local wpnAccent = Instance.new("Frame")
+	wpnAccent.Size = UDim2.new(1, 0, 0, 5)
+	wpnAccent.BackgroundColor3 = CONFIG.HUD_WEAPON_COLOR
+	wpnAccent.BorderSizePixel = 0
+	wpnAccent.Parent = wpnBox
+	STATE.hud.wpnAccent = wpnAccent
+
+	buildWeaponGlyph(wpnBox, CONFIG.HUD_WEAPON_COLOR)
 
 	local wpnTitle = Instance.new("TextLabel")
-	wpnTitle.Size = UDim2.new(0.66, -12, 0, 34)
-	wpnTitle.Position = UDim2.fromOffset(12, 6)
+	wpnTitle.Size = UDim2.new(1, -110, 0, 36)
+	wpnTitle.Position = UDim2.fromOffset(14, 12)
 	wpnTitle.BackgroundTransparency = 1
 	wpnTitle.Font = Enum.Font.GothamBlack
-	wpnTitle.TextSize = 25
+	wpnTitle.TextSize = 24
 	wpnTitle.TextXAlignment = Enum.TextXAlignment.Left
 	wpnTitle.TextColor3 = CONFIG.HUD_WEAPON_COLOR
 	wpnTitle.Text = CONFIG.HUD_WEAPON_TITLE
 	wpnTitle.Parent = wpnBox
 	STATE.hud.wpnTitle = wpnTitle
 
-	local hintLbl = Instance.new("TextLabel")
-	hintLbl.Size = UDim2.new(0.34, -12, 0, 34)
-	hintLbl.Position = UDim2.new(0.66, 0, 0, 6)
-	hintLbl.BackgroundTransparency = 1
-	hintLbl.Font = Enum.Font.Code
-	hintLbl.TextSize = 16
-	hintLbl.TextXAlignment = Enum.TextXAlignment.Right
-	hintLbl.TextColor3 = STATE.fpHideArms and CONFIG.BEAM_CYAN or CONFIG.HUD_WEAPON_COLOR
-	hintLbl.Text = STATE.fpHideArms and "[X] 1P ARMS: OFF" or "[X] 1P ARMS: ON"
-	hintLbl.Parent = wpnBox
-	STATE.hud.hint = hintLbl
-
+	-- 4 Pips de Moeda / Carga
 	for i = 1, 4 do
-		local coinSlot = Instance.new("Frame")
-		coinSlot.Size = UDim2.new(0.25, -10, 0, 38)
-		coinSlot.Position = UDim2.new((i - 1) * 0.25, 10, 0, 46)
-		coinSlot.BackgroundColor3 = Color3.fromRGB(36, 32, 16)
-		coinSlot.BorderSizePixel = 0
-		coinSlot.Parent = wpnBox
+		local pipTrack = Instance.new("Frame")
+		pipTrack.Size = UDim2.fromOffset(98, 28)
+		pipTrack.Position = UDim2.fromOffset(14 + (i - 1) * 106, 62)
+		pipTrack.BackgroundColor3 = UK_COLOR.TrackBg
+		pipTrack.BorderSizePixel = 0
+		pipTrack.Parent = wpnBox
 
-		local cStroke = Instance.new("UIStroke")
-		cStroke.Color = CONFIG.HUD_PIP_COLOR
-		cStroke.Thickness = 2
-		cStroke.Transparency = 0.4
-		cStroke.Parent = coinSlot
-
-		local coinFill = Instance.new("Frame")
-		coinFill.Size = UDim2.fromScale(1, 1)
-		coinFill.BackgroundColor3 = CONFIG.HUD_PIP_COLOR
-		coinFill.BorderSizePixel = 0
-		coinFill.Parent = coinSlot
-		STATE.hud.coinPips[i] = coinFill
+		local pipFill = Instance.new("Frame")
+		pipFill.Size = UDim2.fromScale(1, 1)
+		pipFill.BackgroundColor3 = CONFIG.HUD_PIP_COLOR
+		pipFill.BorderSizePixel = 0
+		pipFill.Parent = pipTrack
+		STATE.hud.coinPips[i] = pipFill
 	end
 
-	local keyHint = Instance.new("TextLabel")
-	keyHint.Size = UDim2.new(1, -20, 0, 34)
-	keyHint.Position = UDim2.fromOffset(12, 92)
-	keyHint.BackgroundTransparency = 1
-	keyHint.Font = Enum.Font.Code
-	keyHint.TextSize = 18
-	keyHint.TextXAlignment = Enum.TextXAlignment.Left
-	keyHint.TextColor3 = Color3.fromRGB(205, 225, 235)
-	keyHint.Text = CONFIG.HUD_KEY_HINT
-	keyHint.Parent = wpnBox
-	STATE.hud.keyHint = keyHint
+	-- Barra estilo Railcannon / Carga Especial na base do painel da arma
+	local railLabel = Instance.new("TextLabel")
+	railLabel.Size = UDim2.new(1, -28, 0, 18)
+	railLabel.Position = UDim2.fromOffset(14, 102)
+	railLabel.BackgroundTransparency = 1
+	railLabel.Font = Enum.Font.Code
+	railLabel.TextSize = 14
+	railLabel.TextXAlignment = Enum.TextXAlignment.Left
+	railLabel.TextColor3 = UK_COLOR.TextDim
+	railLabel.Text = "CHARGE"
+	railLabel.Parent = wpnBox
 
-	local footerHint = Instance.new("TextLabel")
-	footerHint.Size = UDim2.new(1, -24, 0, 26)
-	footerHint.Position = UDim2.fromOffset(12, 298)
-	footerHint.BackgroundTransparency = 1
-	footerHint.Font = Enum.Font.Code
-	footerHint.TextSize = 16
-	footerHint.TextXAlignment = Enum.TextXAlignment.Left
-	footerHint.TextColor3 = Color3.fromRGB(145, 175, 200)
-	footerHint.Text = "[SHIFT] SPRINT   [F7] REBUILD   [F6] STOP"
-	footerHint.Parent = lFrame
+	local railTrack = Instance.new("Frame")
+	railTrack.Size = UDim2.new(1, -28, 0, 20)
+	railTrack.Position = UDim2.fromOffset(14, 124)
+	railTrack.BackgroundColor3 = UK_COLOR.TrackBg
+	railTrack.BorderSizePixel = 0
+	railTrack.Parent = wpnBox
 
+	local railFill = Instance.new("Frame")
+	railFill.Size = UDim2.fromScale(1, 1)
+	railFill.BackgroundColor3 = UK_COLOR.RailFull
+	railFill.BorderSizePixel = 0
+	railFill.Parent = railTrack
+	STATE.hud.railFill = railFill
+
+	-- 3B. Caixa do Braco (Feedbacker)
+	local armBox = makeUKBox(lFrame, UDim2.fromOffset(166, 164), UDim2.fromOffset(454, 116))
+	local armAccent = Instance.new("Frame")
+	armAccent.Size = UDim2.new(1, 0, 0, 5)
+	armAccent.BackgroundColor3 = CONFIG.HUD_ARM_COLOR
+	armAccent.BorderSizePixel = 0
+	armAccent.Parent = armBox
+	STATE.hud.armAccent = armAccent
+
+	STATE.hud.armIconWrap = buildArmGlyph(armBox, CONFIG.HUD_ARM_COLOR)
+
+	local armBarTrack = Instance.new("Frame")
+	armBarTrack.Size = UDim2.new(1, -20, 0, 14)
+	armBarTrack.Position = UDim2.new(0, 10, 1, -24)
+	armBarTrack.BackgroundColor3 = UK_COLOR.TrackBg
+	armBarTrack.BorderSizePixel = 0
+	armBarTrack.Parent = armBox
+
+	local armBarFill = Instance.new("Frame")
+	armBarFill.Size = UDim2.fromScale(1, 1)
+	armBarFill.BackgroundColor3 = CONFIG.HUD_ARM_COLOR
+	armBarFill.BorderSizePixel = 0
+	armBarFill.Parent = armBarTrack
+	STATE.hud.armBarFill = armBarFill
+
+	-- 4. Speedometer compacto estilo ULTRA_REVAMP + status discreto de 1P Arms
+	if CONFIG.SHOW_SPEEDOMETER then
+		local spdBox = makeUKBox(lFrame, UDim2.fromOffset(156, 36), UDim2.fromOffset(0, 288))
+		STATE.hud.speedBox = spdBox
+		local spdLbl = Instance.new("TextLabel")
+		spdLbl.Size = UDim2.fromScale(1, 1)
+		spdLbl.BackgroundTransparency = 1
+		spdLbl.Font = Enum.Font.Code
+		spdLbl.TextSize = 20
+		spdLbl.TextColor3 = UK_COLOR.TextMain
+		spdLbl.Text = "0.00 u/s"
+		spdLbl.Parent = spdBox
+		STATE.hud.speedLabel = spdLbl
+	end
+
+	local armsTagBox = makeUKBox(lFrame, UDim2.fromOffset(170, 36), UDim2.fromOffset(164, 288))
+	local hintLbl = Instance.new("TextLabel")
+	hintLbl.Size = UDim2.fromScale(1, 1)
+	hintLbl.BackgroundTransparency = 1
+	hintLbl.Font = Enum.Font.Code
+	hintLbl.TextSize = 15
+	hintLbl.TextColor3 = STATE.fpHideArms and UK_COLOR.RailFull or UK_COLOR.TextDim
+	hintLbl.Text = STATE.fpHideArms and "[X] 1P ARMS: OFF" or "[X] 1P ARMS: ON"
+	hintLbl.Parent = armsTagBox
+	STATE.hud.hint = hintLbl
+
+	-- ========================================================================
+	-- PAINEL DIREITO 3D (STYLE METER AUTENTICO DO ULTRAKILL)
+	-- ========================================================================
 	local rightGui = Instance.new("SurfaceGui")
 	rightGui.Name = "F3XV1_3DHUD_Right"
 	rightGui.Adornee = rightPart
 	rightGui.Face = Enum.NormalId.Front
 	rightGui.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
-	rightGui.CanvasSize = Vector2.new(540, 460)
+	rightGui.CanvasSize = Vector2.new(520, 466)
 	rightGui.AlwaysOnTop = true
 	rightGui.LightInfluence = 0
 	rightGui.ResetOnSpawn = false
@@ -869,66 +1003,34 @@ local function setupHUD()
 
 	local rFrame = Instance.new("Frame")
 	rFrame.Size = UDim2.fromScale(1, 1)
-	rFrame.BackgroundColor3 = Color3.fromRGB(7, 10, 15)
-	rFrame.BackgroundTransparency = 0.24
+	rFrame.BackgroundTransparency = 1
 	rFrame.BorderSizePixel = 0
 	rFrame.Parent = rightGui
 	STATE.hud.rightFrame = rFrame
 
-	local rStroke = Instance.new("UIStroke")
-	rStroke.Color = Color3.fromRGB(255, 255, 255)
-	rStroke.Thickness = 3
-	rStroke.Transparency = 0.35
-	rStroke.Parent = rFrame
-	addCornerBrackets(rFrame, CONFIG.YELLOW_NEON, 24, 4)
+	-- 1. Cabecalho do Rank de Estilo (D ESTRUCTIVE .. ULTRAKILL)
+	local rankBox = makeUKBox(rFrame, UDim2.fromOffset(520, 108), UDim2.fromOffset(0, 0))
 
-	local rankBadge = Instance.new("TextLabel")
-	rankBadge.Size = UDim2.fromOffset(125, 110)
-	rankBadge.Position = UDim2.fromOffset(14, 12)
-	rankBadge.BackgroundColor3 = Color3.fromRGB(16, 20, 28)
-	rankBadge.BorderSizePixel = 0
-	rankBadge.Font = Enum.Font.GothamBlack
-	rankBadge.TextSize = 72
-	rankBadge.TextColor3 = STYLE_RANKS[1].color
-	rankBadge.Text = "D"
-	rankBadge.Parent = rFrame
-	STATE.hud.rankBadge = rankBadge
-
-	local rbStroke = Instance.new("UIStroke")
-	rbStroke.Color = STYLE_RANKS[1].color
-	rbStroke.Thickness = 3
-	rbStroke.Parent = rankBadge
-
-	local rankTitle = Instance.new("TextLabel")
-	rankTitle.Size = UDim2.new(1, -158, 0, 52)
-	rankTitle.Position = UDim2.fromOffset(150, 14)
-	rankTitle.BackgroundTransparency = 1
-	rankTitle.Font = Enum.Font.GothamBlack
-	rankTitle.TextSize = 34
-	rankTitle.TextXAlignment = Enum.TextXAlignment.Left
-	rankTitle.TextColor3 = STYLE_RANKS[1].color
-	rankTitle.Text = "DESTRUCTIVE"
-	rankTitle.Parent = rFrame
-	STATE.hud.rankTitle = rankTitle
-
-	local multLabel = Instance.new("TextLabel")
-	multLabel.Size = UDim2.new(1, -158, 0, 32)
-	multLabel.Position = UDim2.fromOffset(150, 66)
-	multLabel.BackgroundTransparency = 1
-	multLabel.Font = Enum.Font.Code
-	multLabel.TextSize = 24
-	multLabel.TextXAlignment = Enum.TextXAlignment.Left
-	multLabel.TextColor3 = Color3.fromRGB(235, 240, 255)
-	multLabel.Text = "MULTIPLIER: x1.00"
-	multLabel.Parent = rFrame
-	STATE.hud.multLabel = multLabel
+	local rankLabel = Instance.new("TextLabel")
+	rankLabel.Size = UDim2.new(1, -24, 0, 74)
+	rankLabel.Position = UDim2.fromOffset(14, 8)
+	rankLabel.BackgroundTransparency = 1
+	rankLabel.Font = Enum.Font.GothamBlack
+	rankLabel.TextSize = 42
+	rankLabel.TextXAlignment = Enum.TextXAlignment.Left
+	rankLabel.TextYAlignment = Enum.TextYAlignment.Center
+	rankLabel.RichText = true
+	rankLabel.TextColor3 = STYLE_RANKS[1].color
+	rankLabel.Text = '<font size="68">D</font><font size="34">ESTRUCTIVE</font>'
+	rankLabel.Parent = rankBox
+	STATE.hud.rankLabel = rankLabel
 
 	local rankBarBack = Instance.new("Frame")
-	rankBarBack.Size = UDim2.new(1, -28, 0, 16)
-	rankBarBack.Position = UDim2.fromOffset(14, 134)
-	rankBarBack.BackgroundColor3 = Color3.fromRGB(24, 28, 36)
+	rankBarBack.Size = UDim2.new(1, -28, 0, 10)
+	rankBarBack.Position = UDim2.new(0, 14, 1, -20)
+	rankBarBack.BackgroundColor3 = UK_COLOR.TrackBg
 	rankBarBack.BorderSizePixel = 0
-	rankBarBack.Parent = rFrame
+	rankBarBack.Parent = rankBox
 
 	local rankBarFill = Instance.new("Frame")
 	rankBarFill.Size = UDim2.fromScale(0, 1)
@@ -937,20 +1039,66 @@ local function setupHUD()
 	rankBarFill.Parent = rankBarBack
 	STATE.hud.rankBarFill = rankBarFill
 
+	-- 2. Feed de Bonus de Estilo (+ PARRY, + KILL, + GROUND SLAM)
+	local feedBox = makeUKBox(rFrame, UDim2.fromOffset(520, 250), UDim2.fromOffset(0, 116))
+
 	local feed = Instance.new("TextLabel")
-	feed.Size = UDim2.new(1, -28, 1, -172)
-	feed.Position = UDim2.fromOffset(14, 160)
+	feed.Size = UDim2.new(1, -28, 1, -20)
+	feed.Position = UDim2.fromOffset(14, 10)
 	feed.BackgroundTransparency = 1
 	feed.Font = Enum.Font.GothamBold
-	feed.TextSize = 26
+	feed.TextSize = 25
 	feed.TextYAlignment = Enum.TextYAlignment.Top
-	feed.TextXAlignment = Enum.TextXAlignment.Right
+	feed.TextXAlignment = Enum.TextXAlignment.Left
 	feed.RichText = true
 	feed.TextWrapped = true
 	feed.Text = ""
-	feed.Parent = rFrame
+	feed.Parent = feedBox
 	STATE.hud.styleFeed = feed
 
+	-- 3. Multiplicador de Movimento & Freshness (1.00x -> 3.00x no ar/slide)
+	local multBox = makeUKBox(rFrame, UDim2.fromOffset(520, 74), UDim2.fromOffset(0, 374))
+
+	local multTitle = Instance.new("TextLabel")
+	multTitle.Size = UDim2.new(0.55, 0, 0, 28)
+	multTitle.Position = UDim2.fromOffset(14, 8)
+	multTitle.BackgroundTransparency = 1
+	multTitle.Font = Enum.Font.GothamBold
+	multTitle.TextSize = 18
+	multTitle.TextXAlignment = Enum.TextXAlignment.Left
+	multTitle.TextColor3 = UK_COLOR.TextDim
+	multTitle.Text = "MULTIPLIER"
+	multTitle.Parent = multBox
+
+	local multLabel = Instance.new("TextLabel")
+	multLabel.Size = UDim2.new(0.45, -14, 0, 32)
+	multLabel.Position = UDim2.new(0.55, 0, 0, 6)
+	multLabel.BackgroundTransparency = 1
+	multLabel.Font = Enum.Font.GothamBlack
+	multLabel.TextSize = 28
+	multLabel.TextXAlignment = Enum.TextXAlignment.Right
+	multLabel.TextColor3 = UK_COLOR.TextMain
+	multLabel.Text = "1.00x"
+	multLabel.Parent = multBox
+	STATE.hud.multLabel = multLabel
+
+	local multTrack = Instance.new("Frame")
+	multTrack.Size = UDim2.new(1, -28, 0, 14)
+	multTrack.Position = UDim2.fromOffset(14, 44)
+	multTrack.BackgroundColor3 = UK_COLOR.TrackBg
+	multTrack.BorderSizePixel = 0
+	multTrack.Parent = multBox
+
+	local multBarFill = Instance.new("Frame")
+	multBarFill.Size = UDim2.fromScale(0, 1)
+	multBarFill.BackgroundColor3 = UK_COLOR.RailFull
+	multBarFill.BorderSizePixel = 0
+	multBarFill.Parent = multTrack
+	STATE.hud.multBarFill = multBarFill
+
+	-- ========================================================================
+	-- MIRA CENTRAL + CROSSHAIR HUD DE VIDA E STAMINA DO ULTRAKILL
+	-- ========================================================================
 	local crossGui = Instance.new("ScreenGui")
 	crossGui.Name = "F3XV1_Crosshair"
 	crossGui.ResetOnSpawn = false
@@ -960,45 +1108,146 @@ local function setupHUD()
 	STATE.hud.crossGui = crossGui
 
 	local cross = Instance.new("Frame")
-	cross.Size = UDim2.fromOffset(44, 44)
-	cross.Position = UDim2.new(0.5, -22, 0.5, -22)
+	cross.Size = UDim2.fromOffset(110, 80)
+	cross.Position = UDim2.new(0.5, -55, 0.5, -40)
 	cross.BackgroundTransparency = 1
 	cross.Parent = crossGui
 
 	local dot = Instance.new("Frame")
-	dot.Size = UDim2.fromOffset(4, 4)
-	dot.Position = UDim2.new(0.5, -2, 0.5, -2)
+	dot.Size = UDim2.fromOffset(3, 3)
+	dot.Position = UDim2.new(0.5, -1, 0.5, -1)
 	dot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 	dot.BorderSizePixel = 0
 	dot.Parent = cross
 
 	for _, tCfg in ipairs({
-		{ UDim2.new(0.5, -12, 0.5, -1), UDim2.fromOffset(6, 2) },
-		{ UDim2.new(0.5, 6, 0.5, -1),   UDim2.fromOffset(6, 2) },
-		{ UDim2.new(0.5, -1, 0.5, -12), UDim2.fromOffset(2, 6) },
-		{ UDim2.new(0.5, -1, 0.5, 6),   UDim2.fromOffset(2, 6) },
+		{ UDim2.new(0.5, -10, 0.5, -1), UDim2.fromOffset(5, 2) },
+		{ UDim2.new(0.5, 5, 0.5, -1),   UDim2.fromOffset(5, 2) },
+		{ UDim2.new(0.5, -1, 0.5, -10), UDim2.fromOffset(2, 5) },
+		{ UDim2.new(0.5, -1, 0.5, 5),   UDim2.fromOffset(2, 5) },
 	}) do
 		local tick = Instance.new("Frame")
 		tick.Position = tCfg[1]
 		tick.Size = tCfg[2]
 		tick.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		tick.BackgroundTransparency = 0.25
+		tick.BackgroundTransparency = 0.15
 		tick.BorderSizePixel = 0
 		tick.Parent = cross
 	end
 
+	-- Barra vertical esquerda na mira (Vida + Soft/Hard Damage)
+	local cLeft = Instance.new("Frame")
+	cLeft.Size = UDim2.fromOffset(5, 48)
+	cLeft.Position = UDim2.new(0.5, -34, 0.5, -24)
+	cLeft.BackgroundColor3 = UK_COLOR.HealthBack
+	cLeft.BackgroundTransparency = 0.25
+	cLeft.BorderSizePixel = 0
+	cLeft.ClipsDescendants = true
+	cLeft.Parent = cross
+	STATE.hud.crossHudLeft = cLeft
+
+	local cSoft = Instance.new("Frame")
+	cSoft.AnchorPoint = Vector2.new(0, 1)
+	cSoft.Position = UDim2.fromScale(0, 1)
+	cSoft.Size = UDim2.fromScale(1, 1)
+	cSoft.BackgroundColor3 = UK_COLOR.SoftDamage
+	cSoft.BorderSizePixel = 0
+	cSoft.Parent = cLeft
+	STATE.hud.crossSoftFill = cSoft
+
+	local cHp = Instance.new("Frame")
+	cHp.AnchorPoint = Vector2.new(0, 1)
+	cHp.Position = UDim2.fromScale(0, 1)
+	cHp.Size = UDim2.fromScale(1, 1)
+	cHp.BackgroundColor3 = UK_COLOR.Health
+	cHp.BorderSizePixel = 0
+	cHp.ZIndex = 2
+	cHp.Parent = cLeft
+	STATE.hud.crossHpFill = cHp
+
+	local cHard = Instance.new("Frame")
+	cHard.Size = UDim2.fromScale(1, 0)
+	cHard.BackgroundColor3 = UK_COLOR.HardDamage
+	cHard.BorderSizePixel = 0
+	cHard.ZIndex = 3
+	cHard.Parent = cLeft
+	STATE.hud.crossHardFill = cHard
+
+	-- Barra vertical direita na mira (3 blocos de Stamina)
+	local cRight = Instance.new("Frame")
+	cRight.Size = UDim2.fromOffset(5, 48)
+	cRight.Position = UDim2.new(0.5, 29, 0.5, -24)
+	cRight.BackgroundTransparency = 1
+	cRight.Parent = cross
+	STATE.hud.crossHudRight = cRight
+
+	for i = 1, 3 do
+		local slot = Instance.new("Frame")
+		slot.Size = UDim2.fromOffset(5, 14)
+		slot.Position = UDim2.fromOffset(0, (3 - i) * 17)
+		slot.BackgroundColor3 = Color3.fromRGB(20, 14, 16)
+		slot.BackgroundTransparency = 0.25
+		slot.BorderSizePixel = 0
+		slot.Parent = cRight
+
+		local fill = Instance.new("Frame")
+		fill.AnchorPoint = Vector2.new(0, 1)
+		fill.Position = UDim2.fromScale(0, 1)
+		fill.Size = UDim2.fromScale(1, 1)
+		fill.BackgroundColor3 = UK_COLOR.StaminaFull
+		fill.BorderSizePixel = 0
+		fill.Parent = slot
+		STATE.hud.crossStamBars[i] = fill
+	end
+
+	-- Hitmarker discreto no centro
 	local hitm = Instance.new("TextLabel")
-	hitm.Size = UDim2.fromOffset(36, 36)
-	hitm.Position = UDim2.new(0.5, -18, 0.5, -18)
+	hitm.Size = UDim2.fromOffset(30, 30)
+	hitm.Position = UDim2.new(0.5, -15, 0.5, -15)
 	hitm.BackgroundTransparency = 1
 	hitm.Font = Enum.Font.GothamBlack
-	hitm.TextSize = 26
-	hitm.TextColor3 = CONFIG.YELLOW_NEON
+	hitm.TextSize = 22
+	hitm.TextColor3 = UK_COLOR.TextMain
 	hitm.Text = "X"
 	hitm.Visible = false
 	hitm.Parent = cross
 	STATE.hud.hitmarker = hitm
 
+	-- Indicador minimo de controles no PC ([H] abre painel compacto sem poluir o HUD)
+	if not UIS.TouchEnabled then
+		local helpHint = makeUKBox(crossGui, UDim2.fromOffset(118, 22), UDim2.new(1, -130, 1, -34), 0.55)
+		local helpHintTxt = Instance.new("TextLabel")
+		helpHintTxt.Size = UDim2.fromScale(1, 1)
+		helpHintTxt.BackgroundTransparency = 1
+		helpHintTxt.Font = Enum.Font.Code
+		helpHintTxt.TextSize = 12
+		helpHintTxt.TextColor3 = UK_COLOR.TextDim
+		helpHintTxt.Text = "[H] CONTROLS"
+		helpHintTxt.Parent = helpHint
+
+		local helpPanel = makeUKBox(crossGui, UDim2.fromOffset(252, 168), UDim2.new(1, -264, 1, -208), 0.28)
+		helpPanel.Visible = false
+		local helpTxt = Instance.new("TextLabel")
+		helpTxt.Size = UDim2.new(1, -16, 1, -14)
+		helpTxt.Position = UDim2.fromOffset(8, 7)
+		helpTxt.BackgroundTransparency = 1
+		helpTxt.Font = Enum.Font.Code
+		helpTxt.TextSize = 12
+		helpTxt.TextXAlignment = Enum.TextXAlignment.Left
+		helpTxt.TextYAlignment = Enum.TextYAlignment.Top
+		helpTxt.TextColor3 = UK_COLOR.TextMain
+		helpTxt.Text = table.concat({
+			CONFIG.HUD_KEY_HINT,
+			"[SHIFT] SPRINT   [R] SWAP",
+			"[SPACE] WALL-KICK / GLIDE",
+			"[X] 1P ARMS      [M] MUTE BGM",
+			"[F7] REBUILD     [F6] STOP",
+		}, "\n")
+		helpTxt.Parent = helpPanel
+		STATE.hud.helpPanel = helpPanel
+	end
+
+	-- Atualizacao de inclinacao 3D (Sway natural do visor do ULTRAKILL)
 	RunService:BindToRenderStep(CONFIG.HUD_RENDER_NAME, Enum.RenderPriority.Camera.Value + 5, function(dt)
 		local curCam = workspace.CurrentCamera
 		local h = STATE and STATE.hud
@@ -1010,15 +1259,15 @@ local function setupHUD()
 		if h.prevCamLook then
 			local dLook = look - h.prevCamLook
 			local locD = curCam.CFrame:VectorToObjectSpace(dLook)
-			h.swayYaw = clamp(lerp(h.swayYaw, -locD.X * 140, clamp(dt * 12, 0, 1)), -12, 12)
-			h.swayPitch = clamp(lerp(h.swayPitch, locD.Y * 140, clamp(dt * 12, 0, 1)), -10, 10)
+			h.swayYaw = clamp(lerp(h.swayYaw, -locD.X * 135, clamp(dt * 12, 0, 1)), -10, 10)
+			h.swayPitch = clamp(lerp(h.swayPitch, locD.Y * 135, clamp(dt * 12, 0, 1)), -8, 8)
 		end
 		h.prevCamLook = look
 
 		if hrp then
 			local locV = curCam.CFrame:VectorToObjectSpace(hrp.AssemblyLinearVelocity)
-			h.swayX = clamp(lerp(h.swayX, -locV.X * 0.0045, clamp(dt * 10, 0, 1)), -0.22, 0.22)
-			h.swayY = clamp(lerp(h.swayY, -locV.Y * 0.0040, clamp(dt * 10, 0, 1)), -0.20, 0.20)
+			h.swayX = clamp(lerp(h.swayX, -locV.X * 0.004, clamp(dt * 10, 0, 1)), -0.20, 0.20)
+			h.swayY = clamp(lerp(h.swayY, -locV.Y * 0.0036, clamp(dt * 10, 0, 1)), -0.18, 0.18)
 		end
 
 		local vp = curCam.ViewportSize
@@ -1029,18 +1278,18 @@ local function setupHUD()
 		local halfH = dist * math.tan(rad(curCam.FieldOfView * 0.5))
 		local halfW = halfH * aspect
 
-		local popScale = 1 + h.stylePop * 0.14
-		h.leftPart.Size = V(2.35, 1.24, 0.05) * fovScale * aspectScale
-		h.rightPart.Size = V(2.00 * popScale, 1.70 * popScale, 0.05) * fovScale * aspectScale
+		local popScale = 1 + h.stylePop * 0.10
+		h.leftPart.Size = V(2.26, 1.32, 0.05) * fovScale * aspectScale
+		h.rightPart.Size = V(1.92 * popScale, 1.72 * popScale, 0.05) * fovScale * aspectScale
 
-		local leftPos = V(-halfW * 0.66 + h.swayX, -halfH * 0.58 + h.swayY, -dist)
+		local leftPos = V(-halfW * 0.67 + h.swayX, -halfH * 0.56 + h.swayY, -dist)
 		local rightPos = V(halfW * 0.68 + h.swayX, halfH * 0.44 + h.swayY, -dist)
 
-		h.leftPart.CFrame = curCam.CFrame * C(leftPos) * angles(8 + h.swayPitch, 180 + 18 + h.swayYaw, -2)
-		h.rightPart.CFrame = curCam.CFrame * C(rightPos) * angles(-6 + h.swayPitch, 180 - 18 + h.swayYaw, 2)
+		h.leftPart.CFrame = curCam.CFrame * C(leftPos) * angles(6 + h.swayPitch, 180 + 16 + h.swayYaw, -1.5)
+		h.rightPart.CFrame = curCam.CFrame * C(rightPos) * angles(-5 + h.swayPitch, 180 - 16 + h.swayYaw, 1.5)
 	end)
 
-	-- Controles Mobile na formação exata original
+	-- Controles Mobile na formacao exata original, estilizados no padrao ULTRAKILL
 	if UIS.TouchEnabled then
 		local mobGui = Instance.new("ScreenGui")
 		mobGui.Name = "F3XV1_MobileControls"
@@ -1056,12 +1305,12 @@ local function setupHUD()
 			btn.Name = name
 			btn.Size = size
 			btn.Position = pos
-			btn.BackgroundColor3 = Color3.fromRGB(10, 14, 20)
-			btn.BackgroundTransparency = 0.25
+			btn.BackgroundColor3 = UK_COLOR.PanelBg
+			btn.BackgroundTransparency = 0.42
 			btn.BorderSizePixel = 0
-			btn.Font = Enum.Font.Code
-			btn.TextSize = 14
-			btn.TextColor3 = color
+			btn.Font = Enum.Font.GothamBold
+			btn.TextSize = 13
+			btn.TextColor3 = UK_COLOR.TextMain
 			btn.Text = text
 			btn.Active = true
 			btn.Selectable = false
@@ -1069,114 +1318,172 @@ local function setupHUD()
 			btn.Parent = mobGui
 
 			local corner = Instance.new("UICorner")
-			corner.CornerRadius = UDim.new(0, 8)
+			corner.CornerRadius = UDim.new(0, 3)
 			corner.Parent = btn
+
+			local bar = Instance.new("Frame")
+			bar.Name = "AccentStrip"
+			bar.Size = UDim2.new(1, 0, 0, 3)
+			bar.BackgroundColor3 = color
+			bar.BorderSizePixel = 0
+			bar.Parent = btn
 
 			local st = Instance.new("UIStroke")
 			st.Color = color
-			st.Thickness = 1.6
-			st.Transparency = 0.2
+			st.Thickness = 1
+			st.Transparency = 0.65
 			st.Parent = btn
 
 			btn.Activated:Connect(function()
-				if STATE and STATE.alive then onPress(btn, st) end
+				if STATE and STATE.alive then onPress(btn, st, bar) end
 			end)
 			return btn
 		end
 
 		makeMobBtn("ParryBtn", CONFIG.MOBILE_SECONDARY_LABEL, UDim2.fromOffset(72, 54), UDim2.new(1, -172, 1, -168), CONFIG.MOBILE_SECONDARY_COLOR, function()
+			triggerHUDArmPulse()
 			if CHAR_DEF and CHAR_DEF.onSecondary then CHAR_DEF.onSecondary(Core) end
 		end)
 		makeMobBtn("CoinBtn", CONFIG.MOBILE_PRIMARY_LABEL, UDim2.fromOffset(72, 54), UDim2.new(1, -90, 1, -168), CONFIG.MOBILE_PRIMARY_COLOR, function()
+			triggerHUDWeaponPulse()
 			if CHAR_DEF and CHAR_DEF.onPrimary then CHAR_DEF.onPrimary(Core) end
 		end)
-		makeMobBtn("DashBtn", "DASH", UDim2.fromOffset(72, 54), UDim2.new(1, -172, 1, -104), CONFIG.BEAM_CYAN, function()
+		makeMobBtn("DashBtn", "DASH", UDim2.fromOffset(72, 54), UDim2.new(1, -172, 1, -104), UK_COLOR.StaminaFull, function()
 			Core.triggerDash()
 		end)
-		makeMobBtn("SlideBtn", "SLIDE", UDim2.fromOffset(72, 54), UDim2.new(1, -90, 1, -104), Color3.fromRGB(185, 225, 255), function()
+		makeMobBtn("SlideBtn", "SLIDE", UDim2.fromOffset(72, 54), UDim2.new(1, -90, 1, -104), Color3.fromRGB(205, 225, 240), function()
 			Core.triggerSlideOrSlam()
 		end)
-		makeMobBtn("SprintBtn", "SPRINT", UDim2.fromOffset(154, 36), UDim2.new(1, -172, 1, -214), Color3.fromRGB(160, 185, 210), function(btn, st)
+		makeMobBtn("SprintBtn", "SPRINT", UDim2.fromOffset(154, 36), UDim2.new(1, -172, 1, -214), Color3.fromRGB(160, 175, 190), function(btn, st, bar)
 			STATE.mobileSprint = not STATE.mobileSprint
-			local col = STATE.mobileSprint and CONFIG.MARKSMAN_GREEN or Color3.fromRGB(160, 185, 210)
-			btn.TextColor3 = col
+			local col = STATE.mobileSprint and CONFIG.MARKSMAN_GREEN or Color3.fromRGB(160, 175, 190)
+			btn.TextColor3 = STATE.mobileSprint and col or UK_COLOR.TextMain
 			st.Color = col
+			bar.BackgroundColor3 = col
 			btn.Text = STATE.mobileSprint and "SPRINT: ON" or "SPRINT"
 		end)
 
 		if CHAR_DEF and CHAR_DEF.onTertiary then
 			makeMobBtn("SwapBtn", CONFIG.MOBILE_TERTIARY_LABEL, UDim2.fromOffset(72, 54), UDim2.new(1, -254, 1, -168), CONFIG.MOBILE_TERTIARY_COLOR, function()
+				triggerHUDWeaponPulse()
 				CHAR_DEF.onTertiary(Core)
 			end)
 		end
 
-		makeMobBtn("ArmsBtn", "1P ARMS", UDim2.fromOffset(82, 32), UDim2.new(0.5, -132, 0, 12), CONFIG.MARKSMAN_GREEN, function(btn, st)
+		makeMobBtn("ArmsBtn", "1P ARMS", UDim2.fromOffset(82, 32), UDim2.new(0.5, -132, 0, 12), CONFIG.MARKSMAN_GREEN, function(btn, st, bar)
 			STATE.fpHideArms = not STATE.fpHideArms
-			local col = STATE.fpHideArms and CONFIG.BEAM_CYAN or CONFIG.MARKSMAN_GREEN
+			local col = STATE.fpHideArms and UK_COLOR.RailFull or CONFIG.MARKSMAN_GREEN
 			btn.TextColor3 = col
 			st.Color = col
+			bar.BackgroundColor3 = col
 			btn.Text = STATE.fpHideArms and "ARMS: OFF" or "1P ARMS"
 			if STATE.hud.hint then
 				STATE.hud.hint.Text = STATE.fpHideArms and "[X] 1P ARMS: OFF" or "[X] 1P ARMS: ON"
-				STATE.hud.hint.TextColor3 = col
+				STATE.hud.hint.TextColor3 = STATE.fpHideArms and UK_COLOR.RailFull or UK_COLOR.TextDim
 			end
 		end)
 		makeMobBtn("RebuildBtn", "REBUILD", UDim2.fromOffset(82, 32), UDim2.new(0.5, -41, 0, 12), CONFIG.YELLOW_NEON, function()
 			forceRebuild()
 		end)
-		makeMobBtn("StopBtn", "STOP", UDim2.fromOffset(72, 32), UDim2.new(0.5, 50, 0, 12), CONFIG.DAMAGE_FLASH_COLOR, function()
+		makeMobBtn("StopBtn", "STOP", UDim2.fromOffset(72, 32), UDim2.new(0.5, 50, 0, 12), UK_COLOR.Health, function()
 			cleanup()
 		end)
 	end
 end
 
-local function updateHUD(hum, hrp, dt, hudStatus)
+local function updateHUD(hum, hrp, dt, isAir, hudStatus)
 	local h = STATE and STATE.hud
 	if not (CONFIG.ENABLE_HUD and h and h.leftPart and h.leftPart.Parent) then return end
+	local now = os.clock()
 
+	-- Rank atual (necessario tambem para taxa de decaimento de Hard Damage)
+	local rank = STYLE_RANKS[1]
+	for _, r in ipairs(STYLE_RANKS) do
+		if h.stylePoints >= r.min then rank = r end
+	end
+
+	-- Vida + Soft Damage laranja + Hard Damage cinza pela direita
+	local hpFrac, softFrac, hardFrac = 1, 1, 0
 	if hum then
-		local hp = hum.Health
+		local hp = math.max(0, hum.Health)
 		local maxHp = math.max(1, hum.MaxHealth)
 		if hp < STATE.lastHealth then
-			STATE.hardDamage = math.min(maxHp, math.max(STATE.hardDamage, STATE.lastHealth))
+			local dmg = STATE.lastHealth - hp
+			STATE.softDamage = math.min(maxHp, math.max(STATE.softDamage, STATE.lastHealth))
+			STATE.hardDamageAmt = clamp(STATE.hardDamageAmt + dmg * 0.35, 0, maxHp * 0.65)
+			STATE.hardDamageHoldUntil = now + 0.65 / math.max(1, rank.hdRate)
 			STATE.camShake = math.max(STATE.camShake, 0.25)
+			h.crossHudActiveUntil = now + 1.2
+		elseif hp > STATE.lastHealth then
+			STATE.hardDamageAmt = math.max(0, STATE.hardDamageAmt - (hp - STATE.lastHealth) * 0.4)
 		end
 		STATE.lastHealth = hp
-		STATE.hardDamage = math.max(hp, STATE.hardDamage - dt * 16)
+		STATE.softDamage = math.max(hp, STATE.softDamage - dt * 36)
 
-		if h.hpFill and h.hardDmgFill and h.hpText then
-			h.hpFill.Size = UDim2.fromScale(clamp(hp / maxHp, 0, 1), 1)
-			h.hardDmgFill.Size = UDim2.fromScale(clamp(STATE.hardDamage / maxHp, 0, 1), 1)
+		if rank.hdRate >= 99 then
+			STATE.hardDamageAmt = 0
+		elseif now >= STATE.hardDamageHoldUntil then
+			STATE.hardDamageAmt = math.max(0, STATE.hardDamageAmt - dt * 16 * rank.hdRate)
+		end
+
+		hpFrac = clamp(hp / maxHp, 0, 1)
+		softFrac = clamp(STATE.softDamage / maxHp, 0, 1)
+		hardFrac = clamp(STATE.hardDamageAmt / maxHp, 0, 0.75)
+
+		if h.hpFill and h.softDmgFill and h.hardDmgFill and h.overhealFill and h.hpText then
+			h.hpFill.Size = UDim2.fromScale(hpFrac, 1)
+			h.softDmgFill.Size = UDim2.fromScale(softFrac, 1)
+			h.hardDmgFill.Size = UDim2.fromScale(hardFrac, 1)
+			local overFrac = clamp((hp - maxHp) / maxHp, 0, 1)
+			h.overhealFill.Visible = overFrac > 0.005
+			h.overhealFill.Size = UDim2.fromScale(overFrac, 1)
+
 			h.hpText.Text = tostring(math.ceil(hp))
+			h.hpText.TextColor3 = (hp <= maxHp * 0.30) and Color3.fromRGB(255, 110, 110) or UK_COLOR.HealthNum
 		end
 	end
 
+	-- Velocimetro
 	if hrp and h.speedLabel then
-		local spd = math.floor(V(hrp.AssemblyLinearVelocity.X, 0, hrp.AssemblyLinearVelocity.Z).Magnitude + 0.5)
-		h.speedLabel.Text = string.format("%02d u/s", spd)
+		local spd = V(hrp.AssemblyLinearVelocity.X, 0, hrp.AssemblyLinearVelocity.Z).Magnitude
+		h.speedLabel.Text = string.format("%.2f u/s", spd)
 	end
 
+	-- Stamina (3 segmentos)
+	local prevStam = STATE.dash.stamina
 	if STATE.dash.stamina < CONFIG.MAX_STAMINA then
 		STATE.dash.stamina = math.min(CONFIG.MAX_STAMINA, STATE.dash.stamina + dt / CONFIG.STAMINA_REGEN_TIME)
+		if math.floor(STATE.dash.stamina) > math.floor(prevStam) then
+			h.crossHudActiveUntil = now + 1.0
+		end
 	end
 	for i = 1, CONFIG.MAX_STAMINA do
 		local bar = h.stamBars[i]
+		local cBar = h.crossStamBars[i]
+		local segVal = clamp(STATE.dash.stamina - (i - 1), 0, 1)
+		local col = (segVal >= 0.999) and UK_COLOR.StaminaFull
+			or ((segVal <= 0.02) and UK_COLOR.StaminaEmpty or UK_COLOR.StaminaCharge)
+
 		if bar then
-			local segVal = clamp(STATE.dash.stamina - (i - 1), 0, 1)
 			bar.Size = UDim2.fromScale(segVal, 1)
-			bar.BackgroundColor3 = (segVal >= 0.999) and Color3.fromRGB(55, 225, 255) or Color3.fromRGB(28, 120, 175)
+			bar.BackgroundColor3 = col
+		end
+		if cBar then
+			cBar.Size = UDim2.fromScale(1, segVal)
+			cBar.BackgroundColor3 = col
 		end
 	end
 
+	-- Painel da Arma + Barra de Carga + Pips
 	if hudStatus then
 		if h.wpnTitle and hudStatus.weaponTitle then h.wpnTitle.Text = hudStatus.weaponTitle end
-		if h.wpnTitle and hudStatus.weaponColor then
-			h.wpnTitle.TextColor3 = hudStatus.weaponColor
-			if h.wpnStroke then h.wpnStroke.Color = hudStatus.weaponColor end
+		if hudStatus.weaponColor then
+			if h.wpnTitle then h.wpnTitle.TextColor3 = hudStatus.weaponColor end
+			if h.wpnAccent then h.wpnAccent.BackgroundColor3 = hudStatus.weaponColor end
 		end
 		local pipFrac = clamp(hudStatus.chargeFrac or 1, 0, 1)
 		local pipFull = hudStatus.pipColor or CONFIG.HUD_PIP_COLOR
-		local pipDim = hudStatus.pipDimColor or Color3.fromRGB(165, 130, 32)
+		local pipDim = hudStatus.pipDimColor or Color3.fromRGB(130, 102, 24)
 		for i = 1, 4 do
 			local pip = h.coinPips[i]
 			if pip then
@@ -1185,30 +1492,59 @@ local function updateHUD(hum, hrp, dt, hudStatus)
 				pip.BackgroundColor3 = (fill >= 0.999) and pipFull or pipDim
 			end
 		end
+		if h.railFill then
+			h.railFill.Size = UDim2.fromScale(pipFrac, 1)
+			h.railFill.BackgroundColor3 = (pipFrac >= 0.999) and UK_COLOR.RailFull or UK_COLOR.RailCharge
+		end
 	end
 
-	h.stylePoints = math.max(0, h.stylePoints - dt * 62)
-	h.styleMult = math.max(1.0, h.styleMult - dt * 0.14)
+	-- Animacao do braco Feedbacker (recuo + barra de exaustao)
+	if h.armBarFill and h.armIconWrap then
+		local rem = clamp((h.armPulseUntil - now) / 0.36, 0, 1)
+		local readyFrac = 1 - rem
+		h.armBarFill.Size = UDim2.fromScale(readyFrac, 1)
+		h.armBarFill.BackgroundColor3 = (rem > 0.05) and Color3.fromRGB(255, 224, 61) or CONFIG.HUD_ARM_COLOR
+		h.armIconWrap.Position = UDim2.new(0.5, -29, 0, 22 - math.floor(rem * 10))
+	end
+
+	-- Multiplicador de Movimento autentico (sobe ate 3.00x no ar ou deslizando)
+	if isAir or STATE.slide.active or STATE.dash.active then
+		h.styleMult = clamp(h.styleMult + dt * 2.0, 1.0, 3.0)
+	else
+		h.styleMult = clamp(h.styleMult - dt * 10.0, 1.0, 3.0)
+	end
+
+	-- Decaimento progressivo do Rank de Estilo
+	h.stylePoints = math.max(0, h.stylePoints - dt * rank.decay)
 	h.stylePop = math.max(0, h.stylePop - dt * 6.5)
 
-	local rank = STYLE_RANKS[1]
+	-- Recalcula rank apos decaimento
+	rank = STYLE_RANKS[1]
 	for _, r in ipairs(STYLE_RANKS) do
 		if h.stylePoints >= r.min then rank = r end
 	end
-	if h.rankBadge and h.rankTitle and h.rankBarFill and h.multLabel then
-		h.rankBadge.Text = rank.name
-		h.rankBadge.TextColor3 = rank.color
-		local stroke = h.rankBadge:FindFirstChildOfClass("UIStroke")
-		if stroke then stroke.Color = rank.color end
-		h.rankTitle.Text = rank.title
-		h.rankTitle.TextColor3 = rank.color
+
+	if h.rankLabel and h.rankBarFill and h.multLabel and h.multBarFill then
+		if rank.rest == "" then
+			h.rankLabel.Text = '<font size="48">ULTRAKILL</font>'
+		else
+			local bigSz = (#rank.prefix >= 3 and "56") or (#rank.prefix == 2 and "62") or "68"
+			local smallSz = (#rank.prefix >= 3 and "28") or "33"
+			h.rankLabel.Text = string.format('<font size="%s">%s</font><font size="%s">%s</font>', bigSz, rank.prefix, smallSz, rank.rest)
+		end
+		h.rankLabel.TextColor3 = rank.color
+
 		local pct = clamp((h.stylePoints - rank.min) / math.max(1, rank.max - rank.min), 0, 1)
 		h.rankBarFill.Size = UDim2.fromScale(pct, 1)
 		h.rankBarFill.BackgroundColor3 = rank.color
-		h.multLabel.Text = string.format("MULTIPLIER: x%.2f", h.styleMult)
+
+		h.multLabel.Text = string.format("%.2fx", h.styleMult)
+		h.multLabel.TextColor3 = (h.styleMult >= 2.5) and UK_COLOR.RailFull or ((h.styleMult >= 1.5) and CONFIG.YELLOW_NEON or UK_COLOR.TextMain)
+		h.multBarFill.Size = UDim2.fromScale(clamp((h.styleMult - 1.0) / 2.0, 0, 1), 1)
+		h.multBarFill.BackgroundColor3 = h.multLabel.TextColor3
 	end
 
-	local now = os.clock()
+	-- Feed de Bonus
 	local lines = {}
 	for i = #h.styleFeedEntries, 1, -1 do
 		if now >= h.styleFeedEntries[i].expires then
@@ -1222,21 +1558,29 @@ local function updateHUD(hum, hrp, dt, hudStatus)
 	end
 	if h.styleFeed then h.styleFeed.Text = table.concat(lines, "\n") end
 	if h.hitmarker then h.hitmarker.Visible = now < h.hitmarkerUntil end
-end
 
--------------------------------------------------------------------
--- HELPERS DE FÍSICA, NO-COLLISION, MESH E ACESSÓRIOS
--------------------------------------------------------------------
-local function isCombatPhysicsActive(p)
-	if not STATE then return nil end
-	if STATE.ramBusy and STATE.ramPart and p == STATE.ramPart.part then return "ram" end
-	if STATE.seatBusy and STATE.seatPart and p == STATE.seatPart.part then return "seat" end
-	for _, rag in pairs(STATE.ragdollingTargets) do
-		if rag.active and rag.seatDrivePart == p then return "seat" end
+	-- Atualizacao das barras laterais da mira (Crosshair HUD com fade automatico)
+	if h.crossHpFill and h.crossSoftFill and h.crossHardFill then
+		h.crossHpFill.Size = UDim2.fromScale(1, hpFrac)
+		h.crossSoftFill.Size = UDim2.fromScale(1, softFrac)
+		h.crossHardFill.Size = UDim2.fromScale(1, hardFrac)
+
+		local active = (now < h.crossHudActiveUntil) or (STATE.dash.stamina < CONFIG.MAX_STAMINA - 0.05) or (hpFrac < 0.99)
+		local targetVis = active and 0.15 or 0.78
+		h.crossHudAlpha = lerp(h.crossHudAlpha, targetVis, clamp(dt * 8, 0, 1))
+		if h.crossHudLeft then h.crossHudLeft.BackgroundTransparency = clamp(h.crossHudAlpha + 0.15, 0, 0.92) end
+		h.crossHpFill.BackgroundTransparency = h.crossHudAlpha
+		h.crossSoftFill.BackgroundTransparency = h.crossHudAlpha
+		h.crossHardFill.BackgroundTransparency = h.crossHudAlpha
+		for _, cBar in ipairs(h.crossStamBars) do
+			cBar.BackgroundTransparency = h.crossHudAlpha
+		end
 	end
-	return nil
 end
 
+-- ============================================================================
+-- HELPERS DE FISICA, NO-COLLISION, MESH E ACESSORIOS
+-- ============================================================================
 local function lockProxyPhysics(p)
 	p.Anchored = true
 	p.CanCollide = false
@@ -1258,21 +1602,18 @@ local function addNoColPair(limb, p)
 	STATE.noColConstraints[#STATE.noColConstraints + 1] = ncc
 end
 
-local function attachNoColToCharacter(p, c, allowTouch)
+local function attachNoColToCharacter(p, c)
 	if c then
 		for _, limb in ipairs(c:GetDescendants()) do
 			if limb:IsA("BasePart") then addNoColPair(limb, p) end
 		end
 	end
 	table.insert(STATE.proxyConnections, p:GetPropertyChangedSignal("CanCollide"):Connect(function()
-		if isCombatPhysicsActive(p) == "ram" then return end
 		if p.CanCollide then p.CanCollide = false end
 	end))
 	table.insert(STATE.proxyConnections, p:GetPropertyChangedSignal("Anchored"):Connect(function()
-		if isCombatPhysicsActive(p) then return end
 		if not p.Anchored then p.Anchored = true end
 	end))
-	if allowTouch then p.CanTouch = true end
 end
 
 local function clearProxyConnections()
@@ -1351,9 +1692,9 @@ local function getAccessoryAttachment(handle, c, rigType, keepExactPartName)
 	return r6Name, (attachedPart and attachedPart.CFrame:ToObjectSpace(handle.CFrame) or ID_CF)
 end
 
--------------------------------------------------------------------
--- FX VISUAIS, HITSTOP, DAMAGE FLASH, KNOCKBACK & FE PROXY RAGDOLL
--------------------------------------------------------------------
+-- ============================================================================
+-- FX VISUAIS, HITSTOP E ABATE F3X POR REMOCAO DE TORSO
+-- ============================================================================
 local function syncPartMaterial(items)
 	local ep = Core.getEndpoint()
 	if not ep or #items == 0 then return end
@@ -1517,911 +1858,112 @@ function Core.triggerHitstop(duration, tintColor)
 		STATE.hitstopCC = cc
 	end
 	STATE.hitstopCC.Enabled = true
-	STATE.hitstopCC.Brightness = 0.28
-	STATE.hitstopCC.Contrast = 0.35
+	STATE.hitstopCC.Brightness = 0.24
+	STATE.hitstopCC.Contrast = 0.30
 	STATE.hitstopCC.TintColor = tintColor or CONFIG.PARRY_FLASH
 end
 
-buildTargetRayParams = function(targetChar, rag)
-	local rp = RaycastParams.new()
-	rp.FilterType = Enum.RaycastFilterType.Exclude
-	local ignore = {}
-	local c = getChar()
-	if c then ignore[#ignore + 1] = c end
-	if targetChar then ignore[#ignore + 1] = targetChar end
-	for _, pp in ipairs(STATE.proxyParts) do
-		if pp and pp.Parent then ignore[#ignore + 1] = pp end
+-- Resolve o Model de personagem a partir de qualquer instancia passada
+local function resolveTargetModel(targetOrPart)
+	if not targetOrPart then return nil end
+	if typeof(targetOrPart) ~= "Instance" then return nil end
+	if targetOrPart:IsA("Model") then return targetOrPart end
+	local cur = targetOrPart.Parent
+	while cur and cur ~= workspace do
+		if cur:IsA("Model") and (cur:FindFirstChildOfClass("Humanoid") or cur:FindFirstChild("Torso") or cur:FindFirstChild("UpperTorso")) then
+			return cur
+		end
+		cur = cur.Parent
 	end
-	if rag and rag.clones then
-		for _, cl in ipairs(rag.clones) do
-			if cl.part and cl.part.Parent then ignore[#ignore + 1] = cl.part end
+	return nil
+end
+
+-- REWORK: Em vez de knockback/ragdoll complexo, remove o Torso (R6 ou R15) via F3X para matar o alvo instantaneamente
+function Core.applyF3XKnockback(targetChar, _dir, _power)
+	if not (STATE and STATE.alive and CONFIG.ENABLE_TORSO_KILL) then return end
+	targetChar = resolveTargetModel(targetChar)
+	if not (targetChar and targetChar.Parent) then return end
+
+	local myChar = getChar()
+	if targetChar == myChar then return end
+
+	local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
+	if targetHum and targetHum.Health <= 0 then return end
+
+	local now = os.clock()
+	local lastKill = STATE.killedTargets[targetChar]
+	if lastKill and (now - lastKill) < (CONFIG.KILL_DEBOUNCE or 0.45) then
+		return
+	end
+
+	-- Coleta partes do torso (suporta R6 e R15)
+	local torsoParts = {}
+	for _, partName in ipairs({ "Torso", "UpperTorso", "LowerTorso" }) do
+		local p = targetChar:FindFirstChild(partName)
+		if p and p:IsA("BasePart") then
+			torsoParts[#torsoParts + 1] = p
 		end
 	end
-	rp.FilterDescendantsInstances = ignore
-	rp.IgnoreWater = true
-	return rp
-end
+	if #torsoParts == 0 then return end
 
-local function sampleFloorY(pos, targetChar, rp)
-	local res = workspace:Raycast(pos + V(0, 3.5, 0), V(0, -65, 0), rp or buildTargetRayParams(targetChar))
-	return res and res.Position.Y or (pos.Y - 3.0)
-end
-
-trackTargetMove = function(part, cf)
-	if not (part and part.Parent) then return nil end
-	local cur = cf or part.CFrame
-	local entry = STATE.activeTargetMoves[part]
-	if not entry then
-		entry = { part = part, serverCF = cur, pendingCF = cur, targetCF = cur, sendSeq = 0, ackSeq = 0 }
-		STATE.activeTargetMoves[part] = entry
-	else
-		entry.serverCF, entry.pendingCF, entry.targetCF = cur, cur, cur
-	end
-	return entry
-end
-
-driveTargetMove = function(part, cf, skipLocalCF)
-	if not (part and part.Parent and cf) then return end
-	local entry = STATE.activeTargetMoves[part] or trackTargetMove(part, part.CFrame)
-	if not entry then return end
-	entry.targetCF = cf
-	if not skipLocalCF then part.CFrame = cf end
-end
-
-local function flashTargetDamage(targetChar, extraParts)
-	if not CONFIG.ENABLE_DAMAGE_FLASH or not targetChar or not targetChar.Parent then return end
 	local ep = Core.getEndpoint()
 	if not ep then return end
 
-	if not STATE.flashOriginals[targetChar] then
-		local saved = {}
-		for _, d in ipairs(targetChar:GetDescendants()) do
-			if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" and d.Transparency < 1 and not d.Locked then
-				if d.Parent == targetChar or (d.Parent and d.Parent:IsA("Accessory")) then
-					saved[#saved + 1] = { part = d, color = d.Color, mat = d.Material }
-				end
-			end
-		end
-		STATE.flashOriginals[targetChar] = saved
-	end
-
-	local token = (STATE.flashTokens[targetChar] or 0) + 1
-	STATE.flashTokens[targetChar] = token
-
-	local allTargets = {}
-	for _, entry in ipairs(STATE.flashOriginals[targetChar] or {}) do allTargets[#allTargets + 1] = entry end
-	for _, epItem in ipairs(extraParts or {}) do allTargets[#allTargets + 1] = epItem end
-	if #allTargets == 0 then return end
-
-	local p1Colors, p2Colors, fMats = {}, {}, {}
-	for _, entry in ipairs(allTargets) do
-		if entry.part and entry.part.Parent then
-			p1Colors[#p1Colors + 1] = { Part = entry.part, Color = CONFIG.DAMAGE_FLASH_PULSE_COLOR, UnionColoring = true }
-			p2Colors[#p2Colors + 1] = { Part = entry.part, Color = CONFIG.DAMAGE_FLASH_COLOR, UnionColoring = true }
-			fMats[#fMats + 1] = { Part = entry.part, Material = Enum.Material.Neon }
+	STATE.killedTargets[targetChar] = now
+	for kChar, tAt in pairs(STATE.killedTargets) do
+		if not kChar.Parent or (now - tAt) > 5.0 then
+			STATE.killedTargets[kChar] = nil
 		end
 	end
 
+	local killPos = torsoParts[1].Position
+	local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+	local closeKill = myHRP and ((killPos - myHRP.Position).Magnitude <= 26) or false
+
+	-- Executa remocao no servidor sem travar a renderizacao
 	task.spawn(function()
-		f3x(ep, "SyncColor", p1Colors)
-		f3x(ep, "SyncMaterial", fMats)
-		task.wait(math.min(0.08, CONFIG.DAMAGE_FLASH_DURATION * 0.35))
-		if not STATE or STATE.flashTokens[targetChar] ~= token then return end
-		f3x(ep, "SyncColor", p2Colors)
-		task.wait(math.max(0.08, CONFIG.DAMAGE_FLASH_DURATION * 0.65))
-		if not STATE or STATE.flashTokens[targetChar] ~= token then return end
-
-		local rColors, rMats = {}, {}
-		for _, entry in ipairs(allTargets) do
-			if entry.part and entry.part.Parent then
-				rColors[#rColors + 1] = { Part = entry.part, Color = entry.color, UnionColoring = true }
-				rMats[#rMats + 1] = { Part = entry.part, Material = entry.mat }
-			end
-		end
-		if #rColors > 0 then
-			f3x(ep, "SyncColor", rColors)
-			f3x(ep, "SyncMaterial", rMats)
-		end
-		STATE.flashOriginals[targetChar] = nil
-	end)
-end
-
-local function driveTargetHRP(rag, torsoCF)
-	local targetHRP = rag.hrp
-	if not (targetHRP and targetHRP.Parent) then return end
-	if rag.hrpDrive == "direct" or rag.hrpDrive == "syncmove" then
-		local desiredHRP = torsoCF * (rag.rootRestCF and rag.rootRestCF:Inverse() or ID_CF)
-		if rag.directParts and #rag.directParts > 0 then
-			local skipLocal = (rag.hrpDrive == "syncmove")
-			for _, info in ipairs(rag.directParts) do
-				if info.part and info.part.Parent then
-					driveTargetMove(info.part, desiredHRP * info.relToHRP, skipLocal)
+		local ok = f3x(ep, "Remove", torsoParts)
+		if not ok then
+			for _, tp in ipairs(torsoParts) do
+				if tp and tp.Parent then
+					pcall(f3x, ep, "Remove", { tp })
 				end
 			end
-		else
-			driveTargetMove(targetHRP, desiredHRP, rag.hrpDrive == "syncmove")
 		end
-	elseif rag.hrpDrive == "seat" and rag.seatDrivePart and rag.seatDrivePart.Parent and rag.seatRel then
-		local desiredHRP = torsoCF * (rag.rootRestCF and rag.rootRestCF:Inverse() or ID_CF)
-		driveTargetMove(rag.seatDrivePart, desiredHRP * rag.seatRel:Inverse())
-	end
-end
+	end)
 
-local function buildTargetProxyRig(ep, targetChar, torso, upperTorso, isR15, rag)
-	if not (ep and ep.Parent and targetChar and targetChar.Parent and torso) then return false end
-	local origTorsoTrans = torso.Transparency
-	local okProbe = f3x(ep, "SyncMaterial", { { Part = torso, Transparency = 1 } })
-	if okProbe and torso.Transparency < 0.9 then task.wait(0.04) end
-	if not okProbe or torso.Transparency < 0.9 then return false end
-
-	local bodySpecs = {}
-	local function addBodySpec(realPart, parentKey, role)
-		if not (realPart and realPart:IsA("BasePart") and realPart.Transparency < 1) then return end
-		local parentReal = (parentKey == "upper" and upperTorso) or torso
-		local relCF = (realPart == torso) and ID_CF or parentReal.CFrame:ToObjectSpace(realPart.CFrame)
-		bodySpecs[#bodySpecs + 1] = {
-			real = realPart, parentKey = parentKey, role = role, relCF = relCF,
-			size = realPart.Size, color = realPart.Color, mat = realPart.Material,
-			trans = (realPart == torso) and origTorsoTrans or realPart.Transparency,
-			mesh = getMeshSpecForPart(realPart, targetChar, (not isR15) and realPart.Name or nil),
-		}
+	-- Efeito de sangue + estilo ULTRAKILL ao abater
+	if closeKill then
+		spawnFlash(killPos, CONFIG.BLOOD_RED, 1.0, 4.4, 0.22)
+		if (now - STATE.lastSlamImpactAt) > 0.08 then
+			spawnImpactFlash(killPos, CONFIG.BLOOD_RED, 0.9, 3.6, 0.20)
+		end
+		STATE.camShake = math.max(STATE.camShake, 0.35)
 	end
 
-	addBodySpec(torso, "root", "torso")
-	addBodySpec(targetChar:FindFirstChild("Head"), isR15 and "upper" or "torso", "head")
-
-	if isR15 then
-		addBodySpec(upperTorso, "torso", "upper")
-		addBodySpec(targetChar:FindFirstChild("LeftUpperArm"), "upper", "lArm")
-		addBodySpec(targetChar:FindFirstChild("LeftLowerArm"), "lArm", "lLowerArm")
-		addBodySpec(targetChar:FindFirstChild("LeftHand"), "lLowerArm", "lHand")
-		addBodySpec(targetChar:FindFirstChild("RightUpperArm"), "upper", "rArm")
-		addBodySpec(targetChar:FindFirstChild("RightLowerArm"), "rArm", "rLowerArm")
-		addBodySpec(targetChar:FindFirstChild("RightHand"), "rLowerArm", "rHand")
-		addBodySpec(targetChar:FindFirstChild("LeftUpperLeg"), "torso", "lLeg")
-		addBodySpec(targetChar:FindFirstChild("LeftLowerLeg"), "lLeg", "lLowerLeg")
-		addBodySpec(targetChar:FindFirstChild("LeftFoot"), "lLowerLeg", "lFoot")
-		addBodySpec(targetChar:FindFirstChild("RightUpperLeg"), "torso", "rLeg")
-		addBodySpec(targetChar:FindFirstChild("RightLowerLeg"), "rLeg", "rLowerLeg")
-		addBodySpec(targetChar:FindFirstChild("RightFoot"), "rLowerLeg", "rFoot")
+	if (now - STATE.lastKillAt) <= (CONFIG.MULTIKILL_WINDOW or 1.25) then
+		STATE.killStreak += 1
 	else
-		addBodySpec(targetChar:FindFirstChild("Left Arm"), "torso", "lArm")
-		addBodySpec(targetChar:FindFirstChild("Right Arm"), "torso", "rArm")
-		addBodySpec(targetChar:FindFirstChild("Left Leg"), "torso", "lLeg")
-		addBodySpec(targetChar:FindFirstChild("Right Leg"), "torso", "rLeg")
+		STATE.killStreak = 1
 	end
+	STATE.lastKillAt = now
 
-	local roleByPart = {}
-	for _, sp in ipairs(bodySpecs) do roleByPart[sp.real] = sp.role end
-	for _, acc in ipairs(targetChar:GetChildren()) do
-		if acc:IsA("Accessory") then
-			local h = acc:FindFirstChild("Handle")
-			if h and h:IsA("BasePart") and h.Transparency < 1 then
-				local pName, relCF = getAccessoryAttachment(h, targetChar, isR15 and "R15" or "R6", true)
-				local pPart = targetChar:FindFirstChild(pName)
-				local pRole = (pPart and roleByPart[pPart]) or "head"
-				bodySpecs[#bodySpecs + 1] = {
-					real = h, parentKey = pRole, role = "acc", relCF = relCF,
-					size = h.Size, color = h.Color, mat = h.Material, trans = h.Transparency,
-					mesh = getMeshSpecForPart(h, targetChar, nil),
-				}
-			end
-		end
-	end
-
-	if #bodySpecs < 4 then
-		f3x(ep, "SyncMaterial", { { Part = torso, Transparency = origTorsoTrans } })
-		return false
-	end
-
-	local createFns = {}
-	for _, sp in ipairs(bodySpecs) do
-		createFns[#createFns + 1] = function()
-			local ok, np = f3x(ep, "CreatePart", "Normal", sp.real.CFrame, workspace)
-			if ok and typeof(np) == "Instance" and np:IsA("BasePart") then
-				lockProxyPhysics(np)
-				sp.proxy = np
-			end
-		end
-	end
-	runParallelBatched(createFns, CONFIG.MAX_CREATE_WORKERS, 8)
-
-	if not rag.active or rag.restoring then
-		local abortDel = {}
-		for _, sp in ipairs(bodySpecs) do if sp.proxy and sp.proxy.Parent then abortDel[#abortDel + 1] = sp.proxy end end
-		if #abortDel > 0 then f3x(ep, "Remove", abortDel) end
-		f3x(ep, "SyncMaterial", { { Part = torso, Transparency = origTorsoTrans } })
-		return false
-	end
-
-	local resizeQ, colorQ, matQ, anchorQ, colQ, meshCreateQ, meshSyncQ = {}, {}, {}, {}, {}, {}, {}
-	local hideMatQ, hideTexQ = {}, {}
-	local proxyByRole = {}
-
-	for _, sp in ipairs(bodySpecs) do
-		local np = sp.proxy
-		if np and np.Parent then
-			np.Size, np.Color, np.Material, np.Transparency = sp.size, sp.color, sp.mat, sp.trans
-			resizeQ[#resizeQ + 1] = { Part = np, Size = sp.size, CFrame = sp.real.CFrame }
-			colorQ[#colorQ + 1] = { Part = np, Color = sp.color, UnionColoring = true }
-			matQ[#matQ + 1] = { Part = np, Material = sp.mat, Transparency = sp.trans }
-			anchorQ[#anchorQ + 1] = { Part = np, Anchored = true }
-			colQ[#colQ + 1] = { Part = np, CanCollide = false }
-
-			if sp.mesh then
-				local ms = sp.mesh
-				meshCreateQ[#meshCreateQ + 1] = { Part = np }
-				local mS = { Part = np, MeshType = ms.MeshType, Scale = ms.Scale, Offset = ms.Offset }
-				if ms.MeshId and ms.MeshId ~= "" then mS.MeshId = ms.MeshId end
-				if ms.TextureId and ms.TextureId ~= "" then mS.TextureId = ms.TextureId end
-				if ms.VertexColor then mS.VertexColor = ms.VertexColor end
-				meshSyncQ[#meshSyncQ + 1] = mS
-			end
-
-			rag.clones[#rag.clones + 1] = { part = np, role = sp.role, parentKey = sp.parentKey, relCF = sp.relCF, rx = 0, ry = 0, rz = 0 }
-			rag.cloneFlashSaved[#rag.cloneFlashSaved + 1] = { part = np, color = sp.color, mat = sp.mat }
-			if sp.role ~= "acc" then proxyByRole[sp.role] = np end
-			trackTargetMove(np, sp.real.CFrame)
-
-			rag.hiddenParts[#rag.hiddenParts + 1] = { part = sp.real, origTrans = sp.trans }
-			if sp.real ~= torso then hideMatQ[#hideMatQ + 1] = { Part = sp.real, Transparency = 1 } end
-			local decal = (sp.real.Name == "Head") and (sp.real:FindFirstChild("face") or sp.real:FindFirstChildOfClass("Decal")) or nil
-			if decal then
-				rag.hiddenDecals[#rag.hiddenDecals + 1] = { part = sp.real, decal = decal, face = decal.Face, origTrans = decal.Transparency }
-				hideTexQ[#hideTexQ + 1] = { Part = sp.real, Face = decal.Face, TextureType = "Decal", Transparency = 1 }
-			end
-		end
-	end
-
-	rag.proxyByRole = proxyByRole
-	rag.cloneTorso = proxyByRole["torso"]
-
-	runParallelBatched({
-		function() if #anchorQ > 0 then f3x(ep, "SyncAnchor", anchorQ) end end,
-		function() if #colQ > 0 then f3x(ep, "SyncCollision", colQ) end end,
-		function() if #resizeQ > 0 then f3x(ep, "SyncResize", resizeQ) end end,
-		function() if #colorQ > 0 then f3x(ep, "SyncColor", colorQ) end end,
-		function() if #matQ > 0 then f3x(ep, "SyncMaterial", matQ) end end,
-		function() if #hideMatQ > 0 then f3x(ep, "SyncMaterial", hideMatQ) end end,
-		function() if #hideTexQ > 0 then f3x(ep, "SyncTexture", hideTexQ) end end,
-		function() if #meshCreateQ > 0 then f3x(ep, "CreateMeshes", meshCreateQ) end end,
-	}, 6, 8)
-	if #meshSyncQ > 0 then f3x(ep, "SyncMesh", meshSyncQ) end
-
-	rag.mode = "clone"
-	return true
-end
-
-local function triggerPhysicsRamBurst(ep, targetChar, targetHRP, flatDir, power, rag)
-	local ramEntry = STATE and STATE.ramPart
-	if not (ep and ep.Parent and ramEntry and ramEntry.part and ramEntry.part.Parent) then return end
-	if STATE.ramBusy or not (rag and rag.active and not rag.restoring and targetHRP and targetHRP.Parent) then return end
-
-	STATE.ramBusy = true
-	local ramPart = ramEntry.part
-
-	task.spawn(function()
-		pcall(function()
-			local dur = clamp((power and power.duration) or 0.22, 0.08, 0.35)
-			local pushDist = clamp(((power and power.speed) or 40) * dur, 2.5, 22)
-			local upLift = ((power and power.up) or 0) > 15 and clamp(power.up * 0.12, 1.5, 7.0) or 0
-
-			local origin = targetHRP.Position
-			local startPos = origin - flatDir * 3.6 - V(0, upLift > 0 and 1.2 or 0, 0)
-			local endPos = origin + flatDir * pushDist + V(0, upLift, 0)
-
-			-- Keep Anchored = true + CanCollide = true so SyncMove is server-authoritative
-			-- and forces the target's own client to resolve the collision without rubberbanding
-			ramPart.Anchored = true
-			ramPart.CanCollide = true
-			ramPart.CanTouch = true
-			ramPart.CustomPhysicalProperties = PhysicalProperties.new(100, 0.1, 1, 1, 1)
-
-			local initCF = C(startPos, startPos + flatDir)
-			ramPart.CFrame = initCF
-			f3x(ep, "SyncAnchor", { { Part = ramPart, Anchored = true } })
-			f3x(ep, "SyncCollision", { { Part = ramPart, CanCollide = true } })
-			f3x(ep, "SyncMove", { { Part = ramPart, CFrame = initCF } })
-
-			local steps = math.max(3, math.floor(dur / 0.045))
-			for i = 1, steps do
-				if not (STATE and STATE.alive and ramPart.Parent and targetHRP.Parent and rag.active and not rag.restoring) then
-					break
-				end
-				local alpha = easeOutQuad(i / steps)
-				local curPos = startPos:Lerp(endPos, alpha)
-				local stepCF = C(curPos, curPos + flatDir)
-				ramPart.CFrame = stepCF
-				f3x(ep, "SyncMove", { { Part = ramPart, CFrame = stepCF } })
-				task.wait(dur / steps)
-			end
-		end)
-
-		if ramPart and ramPart.Parent and ep and ep.Parent then
-			ramPart.Anchored = true
-			ramPart.CanCollide = false
-			ramPart.CanTouch = false
-			ramPart.CFrame = PARK_CF
-			f3x(ep, "SyncCollision", { { Part = ramPart, CanCollide = false } })
-			f3x(ep, "SyncMove", { { Part = ramPart, CFrame = PARK_CF } })
-		end
-		if STATE then STATE.ramBusy = false end
-	end)
-end
-
-local function runPhysicsRamAndSeat(targetChar, targetHRP, flatDir, power, rag)
-	if not (rag and rag.active and not rag.restoring) then return end
-	if rag.drivingSetup then return end
-	rag.drivingSetup = true
-
-	task.spawn(function()
-		local ep = Core.getEndpoint()
-		if not (ep and targetHRP and targetHRP.Parent and rag.active and not rag.restoring) then
-			rag.drivingSetup = false
-			return
-		end
-
-		if not rag.hrpDrive and not rag.noDirect and not targetHRP.Locked then
-			local origAnchor = targetHRP.Anchored
-			local okHRP = f3x(ep, "SyncAnchor", { { Part = targetHRP, Anchored = true } })
-			if okHRP then
-				local waitStart = os.clock()
-				while not targetHRP.Anchored and (os.clock() - waitStart) < 0.18 and rag.active and not rag.restoring do
-					task.wait(0.02)
-				end
-			end
-			if okHRP and targetHRP.Anchored and rag.active and not rag.restoring then
-				local partsInfo = {
-					{ part = targetHRP, origAnchored = origAnchor, relToHRP = ID_CF },
-				}
-				local limbAnchorList = {}
-				local limbInfos = {}
-				for _, d in ipairs(targetChar:GetChildren()) do
-					if d:IsA("BasePart") and d ~= targetHRP and not d.Locked then
-						local info = {
-							part = d,
-							origAnchored = d.Anchored,
-							relToHRP = targetHRP.CFrame:ToObjectSpace(d.CFrame),
-						}
-						limbInfos[#limbInfos + 1] = info
-						limbAnchorList[#limbAnchorList + 1] = { Part = d, Anchored = true }
-					end
-				end
-
-				if #limbAnchorList > 0 then
-					local okLimbs = f3x(ep, "SyncAnchor", limbAnchorList)
-					if okLimbs then
-						local wLimb = os.clock()
-						local anyAnchored = false
-						while (os.clock() - wLimb) < 0.10 and rag.active and not rag.restoring do
-							for _, info in ipairs(limbInfos) do
-								if info.part.Parent and info.part.Anchored then
-									anyAnchored = true
-									break
-								end
-							end
-							if anyAnchored then break end
-							task.wait(0.02)
-						end
-						if anyAnchored then
-							for _, info in ipairs(limbInfos) do
-								if info.part.Parent and info.part.Anchored then
-									partsInfo[#partsInfo + 1] = info
-								end
-							end
-						else
-							local revertLimbs = {}
-							for _, info in ipairs(limbInfos) do
-								if info.part.Parent then
-									revertLimbs[#revertLimbs + 1] = { Part = info.part, Anchored = info.origAnchored == true }
-								end
-							end
-							if #revertLimbs > 0 then f3x(ep, "SyncAnchor", revertLimbs) end
-						end
-					end
-				end
-
-				rag.hrpDrive = "direct"
-				rag.hrpOrigAnchored = origAnchor
-				rag.directParts = partsInfo
-				local curTorso = targetChar:FindFirstChild("Torso") or targetChar:FindFirstChild("LowerTorso") or targetHRP
-				if rag.mode ~= "clone" then
-					rag.pos = curTorso.Position
-					rag.rootRestCF = targetHRP.CFrame:ToObjectSpace(curTorso.CFrame)
-					rag.standTorsoOffset = math.max(1.2, (rag.standHeight or 3.0) + rag.rootRestCF.Position.Y)
-				end
-				rag.endTime = math.max(rag.endTime, os.clock() + (rag.minDriveHold or 0.24))
-				for _, info in ipairs(partsInfo) do
-					if info.part and info.part.Parent then
-						trackTargetMove(info.part, info.part.CFrame)
-					end
-				end
-				rag.drivingSetup = false
-				return
-			else
-				f3x(ep, "SyncAnchor", { { Part = targetHRP, Anchored = origAnchor == true } })
-			end
-		end
-
-		local seatEntry = STATE and STATE.seatPart
-		local isShortNudge = power and power.duration and power.duration <= 0.30
-		if not isShortNudge and not rag.hrpDrive and CONFIG.ENABLE_SEAT_CAPTURE and seatEntry and seatEntry.part and seatEntry.part.Parent and not STATE.seatBusy then
-			STATE.seatBusy = true
-			rag.capturedSeat = true
-			local sPart = seatEntry.part
-			sPart.CanCollide, sPart.CanTouch = false, true
-
-			for _ = 1, 6 do
-				if not (sPart.Parent and targetHRP.Parent and rag.active and not rag.restoring) then break end
-				local velLead = targetHRP.AssemblyLinearVelocity * 0.05
-				if velLead.Magnitude > 4 then velLead = velLead.Unit * 4 end
-				local catchCF = C(targetHRP.Position + velLead) * targetHRP.CFrame.Rotation
-				sPart.CFrame = catchCF
-				f3x(ep, "SyncMove", { { Part = sPart, CFrame = catchCF } })
-				task.wait(0.045)
-				local welded = sPart:FindFirstChild("SeatWeld") ~= nil or (rag.hum and rag.hum.SeatPart == sPart)
-				if welded then
-					rag.hrpDrive = "seat"
-					rag.seatDrivePart = sPart
-					local rel = sPart.CFrame:ToObjectSpace(targetHRP.CFrame)
-					if rel.Position.Magnitude > 5 then rel = C(0, 1.5, 0) end
-					rag.seatRel = rel
-					local curTorso = targetChar:FindFirstChild("Torso") or targetChar:FindFirstChild("LowerTorso") or targetHRP
-					if rag.mode ~= "clone" then
-						rag.pos = curTorso.Position
-						rag.rootRestCF = targetHRP.CFrame:ToObjectSpace(curTorso.CFrame)
-					end
-					trackTargetMove(sPart, sPart.CFrame)
-					rag.drivingSetup = false
-					return
-				end
-			end
-
-			sPart.CanTouch = false
-			sPart.CFrame = PARK_CF
-			f3x(ep, "SyncMove", { { Part = sPart, CFrame = PARK_CF } })
-			rag.capturedSeat = false
-			STATE.seatBusy = false
-		end
-
-		if not rag.hrpDrive and rag.active and not rag.restoring then
-			triggerPhysicsRamBurst(ep, targetChar, targetHRP, flatDir, power, rag)
-		end
-		rag.drivingSetup = false
-	end)
-end
-
-restoreTargetRagdoll = function(rag)
-	if not rag or rag.restoring then return end
-	rag.restoring = true
-	rag.active = false
-	if STATE and rag.char and STATE.ragdollingTargets[rag.char] == rag then
-		STATE.ragdollingTargets[rag.char] = nil
-	end
-
-	local ep = Core.getEndpoint()
-	local floorY = rag.pos and sampleFloorY(rag.pos, rag.char, buildTargetRayParams(rag.char, rag)) or 0
-
-	if rag.hrp and rag.hrp.Parent then
-		if STATE then
-			STATE.activeTargetMoves[rag.hrp] = nil
-			for _, info in ipairs(rag.directParts or {}) do
-				if info.part then STATE.activeTargetMoves[info.part] = nil end
-			end
-		end
-		if rag.hrpDrive == "direct" or rag.hrpDrive == "syncmove" then
-			local parts = (rag.directParts and #rag.directParts > 0)
-				and rag.directParts
-				or { { part = rag.hrp, origAnchored = rag.hrpOrigAnchored, relToHRP = ID_CF } }
-			for _, info in ipairs(parts) do
-				if info.part and info.part.Parent then
-					pcall(function()
-						info.part.AssemblyLinearVelocity = V(0, 0, 0)
-						info.part.AssemblyAngularVelocity = V(0, 0, 0)
-					end)
-				end
-			end
-			if ep then
-				local rx, ry, rz = rag.hrp.CFrame:ToOrientation()
-				local standY = math.max(rag.hrp.Position.Y, floorY + (rag.standHeight or 3.0))
-				local needsUpright = math.abs(rx) > 0.35 or math.abs(rz) > 0.35 or rag.hrp.Position.Y < floorY + 1.5
-				local finalHRP = needsUpright
-					and (C(rag.hrp.Position.X, standY, rag.hrp.Position.Z) * CFrame.Angles(0, ry, 0))
-					or rag.hrp.CFrame
-
-				local finalMoves, unanchorList = {}, {}
-				for _, info in ipairs(parts) do
-					if info.part and info.part.Parent then
-						local finalCF = needsUpright and (finalHRP * (info.relToHRP or ID_CF)) or info.part.CFrame
-						info.part.CFrame = finalCF
-						finalMoves[#finalMoves + 1] = { Part = info.part, CFrame = finalCF }
-						unanchorList[#unanchorList + 1] = { Part = info.part, Anchored = info.origAnchored == true }
-					end
-				end
-				if #finalMoves > 0 then
-					f3x(ep, "SyncMove", finalMoves)
-				end
-				if #unanchorList > 0 then
-					f3x(ep, "SyncAnchor", unanchorList)
-				end
-			end
-		end
-	end
-
-	if rag.hrpDrive == "seat" and rag.seatDrivePart then
-		local sPart = rag.seatDrivePart
-		if STATE then STATE.activeTargetMoves[sPart] = nil end
-		if sPart.Parent and ep then
-			local safePos = V((rag.pos and rag.pos.X) or sPart.Position.X, floorY + 2.2, (rag.pos and rag.pos.Z) or sPart.Position.Z)
-			local safeCF = C(safePos)
-			sPart.CFrame = safeCF
-			f3x(ep, "SyncMove", { { Part = sPart, CFrame = safeCF } })
-			task.wait(0.03)
-
-			local stillWelded = sPart:FindFirstChild("SeatWeld") ~= nil or (rag.hum and rag.hum.SeatPart == sPart)
-			if stillWelded then
-				if STATE and STATE.seatPart and STATE.seatPart.part == sPart then STATE.seatPart = nil end
-				f3x(ep, "Remove", { sPart })
-				if STATE and STATE.alive then
-					local okNew, newSeat = f3x(ep, "CreatePart", "Seat", PARK_CF, workspace)
-					if okNew and typeof(newSeat) == "Instance" and newSeat:IsA("BasePart") then
-						lockProxyPhysics(newSeat)
-						local c = getChar()
-						if c then attachNoColToCharacter(newSeat, c, false) end
-						STATE.proxyParts[#STATE.proxyParts + 1] = newSeat
-						runParallelBatched({
-							function() f3x(ep, "SyncAnchor", { { Part = newSeat, Anchored = true } }) end,
-							function() f3x(ep, "SyncCollision", { { Part = newSeat, CanCollide = false } }) end,
-							function() f3x(ep, "SyncResize", { { Part = newSeat, Size = V(4.8, 3.2, 4.8), CFrame = PARK_CF } }) end,
-							function() f3x(ep, "SyncMaterial", { { Part = newSeat, Material = Enum.Material.SmoothPlastic, Transparency = 1, Reflectance = 0 } }) end,
-						}, 4, 4)
-						STATE.seatPart = { part = newSeat, serverCF = PARK_CF, pendingCF = PARK_CF, targetCF = PARK_CF, sendSeq = 0, ackSeq = 0, kind = "fx_seat" }
-					end
-				end
-			else
-				sPart.CanTouch = false
-				sPart.CFrame = PARK_CF
-				f3x(ep, "SyncMove", { { Part = sPart, CFrame = PARK_CF } })
-			end
-		end
-		if STATE then STATE.seatBusy = false end
-	end
-
-	if rag.mode == "npc" then
-		for _, mInfo in ipairs(rag.localMotors or {}) do
-			if mInfo.motor and mInfo.motor.Parent then mInfo.motor.Enabled = mInfo.enabled end
-		end
-		for _, cInfo in ipairs(rag.localColOrig or {}) do
-			if cInfo.part and cInfo.part.Parent then cInfo.part.CanCollide = cInfo.col end
-		end
-		for _, inst in ipairs(rag.localTemp or {}) do
-			if inst and inst.Parent then pcall(function() inst:Destroy() end) end
-		end
-		if rag.hum and rag.hum.Parent and rag.hum.Health > 0 then
-			pcall(function()
-				rag.hum.PlatformStand = false
-				rag.hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-			end)
-		end
-	end
-
-	if rag.hiddenParts and #rag.hiddenParts > 0 and ep then
-		local restoreMats = {}
-		for _, hp in ipairs(rag.hiddenParts) do
-			if hp.part and hp.part.Parent then
-				restoreMats[#restoreMats + 1] = { Part = hp.part, Transparency = hp.origTrans }
-			end
-		end
-		if #restoreMats > 0 then f3x(ep, "SyncMaterial", restoreMats) end
-	end
-
-	if rag.hiddenDecals and #rag.hiddenDecals > 0 and ep then
-		local restoreTex = {}
-		for _, hd in ipairs(rag.hiddenDecals) do
-			if hd.part and hd.part.Parent then
-				restoreTex[#restoreTex + 1] = { Part = hd.part, Face = hd.face, TextureType = "Decal", Transparency = hd.origTrans }
-			end
-		end
-		if #restoreTex > 0 then f3x(ep, "SyncTexture", restoreTex) end
-	end
-
-	if rag.clones and #rag.clones > 0 then
-		local remList = {}
-		for _, cl in ipairs(rag.clones) do
-			if cl.part then
-				if STATE then STATE.activeTargetMoves[cl.part] = nil end
-				if cl.part.Parent then remList[#remList + 1] = cl.part end
-			end
-		end
-		if #remList > 0 and ep then
-			for _, ch in ipairs(chunked(remList, 40)) do f3x(ep, "Remove", ch) end
-		end
-	end
-end
-
-local function restoreAllRagdolls()
-	if not STATE then return end
-	local list = {}
-	for _, rag in pairs(STATE.ragdollingTargets) do list[#list + 1] = rag end
-	for _, rag in ipairs(list) do pcall(restoreTargetRagdoll, rag) end
-	STATE.ragdollingTargets = {}
-	STATE.activeTargetMoves = {}
-end
-
-local function startNPCRagdoll(targetChar, targetHum, targetHRP, flatDir, power)
-	local isR15 = (targetHum and targetHum.RigType == Enum.HumanoidRigType.R15) or (targetChar:FindFirstChild("UpperTorso") ~= nil)
-	local torso = isR15 and targetChar:FindFirstChild("LowerTorso") or targetChar:FindFirstChild("Torso")
-
-	local rag = {
-		char = targetChar, hum = targetHum, hrp = targetHRP, mode = "npc", active = true, restoring = false,
-		isR15 = isR15, startTime = os.clock(), endTime = os.clock() + CONFIG.RAGDOLL_DURATION,
-		flatDir = flatDir, pos = (torso and torso.Position) or targetHRP.Position,
-		vel = flatDir * power.speed + V(0, power.up, 0),
-		rot = (torso and torso.CFrame.Rotation) or targetHRP.CFrame.Rotation,
-		angVel = V(-power.spin, (math.random() - 0.5) * 6, (math.random() - 0.5) * 6),
-		rootRestCF = torso and targetHRP.CFrame:ToObjectSpace(torso.CFrame) or ID_CF,
-		standHeight = targetHum and (isR15 and (targetHum.HipHeight + targetHRP.Size.Y * 0.5) or 3.0) or 3.0,
-		localTemp = {}, localMotors = {}, localColOrig = {},
-	}
-	STATE.ragdollingTargets[targetChar] = rag
-
-	pcall(function()
-		targetHum.PlatformStand = true
-		targetHum:ChangeState(Enum.HumanoidStateType.Physics)
-	end)
-
-	for _, d in ipairs(targetChar:GetDescendants()) do
-		if d:IsA("BasePart") and d.Parent == targetChar and d ~= targetHRP then
-			rag.localColOrig[#rag.localColOrig + 1] = { part = d, col = d.CanCollide }
-			d.CanCollide = true
-			if torso and d ~= torso then
-				local ncc = Instance.new("NoCollisionConstraint")
-				ncc.Part0, ncc.Part1, ncc.Parent = torso, d, torso
-				rag.localTemp[#rag.localTemp + 1] = ncc
-			end
-		elseif d:IsA("Motor6D") and d.Part0 and d.Part1 and d.Name ~= "RootJoint" and d.Name ~= "Root" then
-			rag.localMotors[#rag.localMotors + 1] = { motor = d, enabled = d.Enabled }
-			local a0, a1 = Instance.new("Attachment"), Instance.new("Attachment")
-			a0.CFrame, a1.CFrame = d.C0, d.C1
-			a0.Parent, a1.Parent = d.Part0, d.Part1
-			local bs = Instance.new("BallSocketConstraint")
-			bs.Attachment0, bs.Attachment1 = a0, a1
-			bs.LimitsEnabled, bs.UpperAngle = true, (d.Name == "Neck") and 40 or 75
-			bs.TwistLimitsEnabled, bs.TwistLowerAngle, bs.TwistUpperAngle = true, -45, 45
-			bs.Parent = d.Part0
-			d.Enabled = false
-			rag.localTemp[#rag.localTemp + 1] = a0
-			rag.localTemp[#rag.localTemp + 1] = a1
-			rag.localTemp[#rag.localTemp + 1] = bs
-		end
-	end
-
-	local impulse = flatDir * power.speed + V(0, power.up, 0)
-	local spin = V(-power.spin, (math.random() - 0.5) * 10, (math.random() - 0.5) * 10)
-	pcall(function()
-		targetHRP.AssemblyLinearVelocity, targetHRP.AssemblyAngularVelocity = impulse, spin
-		if torso then torso.AssemblyLinearVelocity, torso.AssemblyAngularVelocity = impulse * 1.05, spin end
-	end)
-
-	flashTargetDamage(targetChar)
-	if CONFIG.ENABLE_KNOCKBACK then runPhysicsRamAndSeat(targetChar, targetHRP, flatDir, power, rag) end
-end
-
-function Core.applyF3XKnockback(targetChar, dir, power)
-	if not (STATE and targetChar and targetChar.Parent) then return end
-	power = power or CONFIG.PARRY_KNOCKBACK_POWER
-	local isShortNudge = power.duration ~= nil and power.duration <= 0.30
-	local targetPlayer = Players:GetPlayerFromCharacter(targetChar)
-	local kbDur = targetPlayer
-		and math.max(power.duration or CONFIG.RAGDOLL_DURATION, 0.32)
-		or (power.duration or CONFIG.RAGDOLL_DURATION)
-	local minDriveHold = targetPlayer and 0.24 or 0.08
-
-	local flatDir = V(dir.X, 0, dir.Z)
-	flatDir = (flatDir.Magnitude < 0.01) and V(0, 0, -1) or flatDir.Unit
-
-	local targetHRP = getTargetRoot(targetChar)
-	local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
-	if not (targetHRP and targetHRP:IsA("BasePart")) then return end
-
-	local ep = Core.getEndpoint()
-	local isR15 = (targetHum and targetHum.RigType == Enum.HumanoidRigType.R15) or (targetChar:FindFirstChild("UpperTorso") ~= nil)
-	local torso = isR15 and targetChar:FindFirstChild("LowerTorso") or targetChar:FindFirstChild("Torso")
-	local upperTorso = isR15 and targetChar:FindFirstChild("UpperTorso") or nil
-
-	local existing = STATE.ragdollingTargets[targetChar]
-	local pushSpeed = isShortNudge and math.max(power.speed * 1.45, 22) or power.speed
-	if existing and existing.active then
-		existing.endTime = os.clock() + kbDur
-		existing.minDriveHold = minDriveHold
-		existing.isPushOnly = isShortNudge
-		existing.wallSlammed = false
-		existing.vel = flatDir * pushSpeed + V(0, isShortNudge and power.up or math.max(power.up, 26), 0)
-		existing.flatDir = flatDir
-		existing.angVel = isShortNudge and V(0, 0, 0) or V(-power.spin, (math.random() - 0.5) * 7, (math.random() - 0.5) * 7)
-		if not isShortNudge then
-			existing.pos = (existing.pos or targetHRP.Position) + V(0, 0.9, 0)
-		end
-		if existing.mode == "npc" and not existing.hrpDrive then
-			pcall(function()
-				targetHRP.AssemblyLinearVelocity = existing.vel
-				targetHRP.AssemblyAngularVelocity = V(-power.spin, (math.random() - 0.5) * 10, (math.random() - 0.5) * 10)
-			end)
-		end
-		if not isShortNudge and existing.mode ~= "clone" and CONFIG.ENABLE_TARGET_RAGDOLL and CONFIG.ENABLE_FE_PROXY_RAGDOLL and ep and torso and not torso.Locked then
-			task.spawn(function()
-				local built = buildTargetProxyRig(ep, targetChar, torso, upperTorso, isR15, existing)
-				if built then flashTargetDamage(targetChar, existing.cloneFlashSaved) else flashTargetDamage(targetChar) end
-			end)
-		else
-			flashTargetDamage(targetChar, existing.cloneFlashSaved)
-		end
-		if CONFIG.ENABLE_KNOCKBACK and not existing.hrpDrive then
-			runPhysicsRamAndSeat(targetChar, targetHRP, flatDir, power, existing)
-		end
-		return
-	end
-
-	if not targetPlayer and targetHum and CONFIG.ENABLE_TARGET_RAGDOLL and not isShortNudge then
-		startNPCRagdoll(targetChar, targetHum, targetHRP, flatDir, power)
-		return
-	end
-
-	local _, hrpYaw, _ = targetHRP.CFrame:ToOrientation()
-	local uprightRot = CFrame.Angles(0, hrpYaw, 0)
-	local rootRestCF = torso and targetHRP.CFrame:ToObjectSpace(torso.CFrame) or ID_CF
-	local standHeight = targetHum and (isR15 and (targetHum.HipHeight + targetHRP.Size.Y * 0.5) or 3.0) or 3.0
-
-	local rag = {
-		char = targetChar, hum = targetHum, hrp = targetHRP, mode = "ram", active = true, restoring = false,
-		isR15 = isR15, isPushOnly = isShortNudge, minDriveHold = minDriveHold,
-		startTime = os.clock(), endTime = os.clock() + kbDur,
-		flatDir = flatDir, pos = (torso and torso.Position) or targetHRP.Position,
-		vel = flatDir * pushSpeed + V(0, power.up, 0),
-		rot = isShortNudge and uprightRot or ((torso and torso.CFrame.Rotation) or targetHRP.CFrame.Rotation),
-		uprightRot = uprightRot,
-		angVel = isShortNudge and V(0, 0, 0) or V(-power.spin, (math.random() - 0.5) * 6, (math.random() - 0.5) * 6),
-		rootRestCF = rootRestCF,
-		standHeight = standHeight,
-		standTorsoOffset = math.max(1.2, standHeight + rootRestCF.Position.Y),
-		clones = {}, cloneFlashSaved = {}, hiddenParts = {}, hiddenDecals = {}, proxyByRole = {},
-	}
-	STATE.ragdollingTargets[targetChar] = rag
-
-	if CONFIG.ENABLE_KNOCKBACK then
-		runPhysicsRamAndSeat(targetChar, targetHRP, flatDir, power, rag)
-	end
-
-	if not isShortNudge and CONFIG.ENABLE_TARGET_RAGDOLL and CONFIG.ENABLE_FE_PROXY_RAGDOLL and ep and torso and not torso.Locked then
-		task.spawn(function()
-			local built = buildTargetProxyRig(ep, targetChar, torso, upperTorso, isR15, rag)
-			if built then flashTargetDamage(targetChar, rag.cloneFlashSaved) else flashTargetDamage(targetChar) end
-		end)
+	if STATE.killStreak == 1 then
+		addStyleBonus("KILL", 60, UK_COLOR.TextMain)
+	elseif STATE.killStreak == 2 then
+		addStyleBonus("DOUBLE KILL", 120, Color3.fromRGB(255, 165, 55))
+	elseif STATE.killStreak == 3 then
+		addStyleBonus("TRIPLE KILL", 180, CONFIG.YELLOW_NEON)
 	else
-		flashTargetDamage(targetChar)
+		addStyleBonus("MULTIKILL x" .. tostring(STATE.killStreak), 220, Color3.fromRGB(255, 65, 65))
 	end
 end
 
-local function stepTargetRagdolls(dt)
-	local now = os.clock()
-	local toRestore = {}
+Core.removeTargetTorso = Core.applyF3XKnockback
 
-	for targetChar, rag in pairs(STATE.ragdollingTargets) do
-		if rag.active and not rag.restoring then
-			local targetHum = rag.hum
-			local hasClone = (rag.mode == "clone" and rag.cloneTorso and rag.cloneTorso.Parent)
-			local hasDrive = (rag.hrpDrive == "direct" or rag.hrpDrive == "syncmove" or rag.hrpDrive == "seat")
-
-			if not targetChar.Parent or not rag.hrp.Parent or (targetHum and targetHum.Health <= 0) or now >= rag.endTime then
-				toRestore[#toRestore + 1] = rag
-			elseif hasClone or hasDrive then
-				local rp = buildTargetRayParams(targetChar, rag)
-				rag.vel = rag.vel + V(0, -CONFIG.RAGDOLL_GRAVITY * dt, 0)
-				local disp = rag.vel * dt
-				if disp.Magnitude > 0.05 then
-					local wallHit = workspace:Raycast(rag.pos, disp + disp.Unit * 1.35, rp)
-					if wallHit then
-						local n = wallHit.Normal
-						local impact = -rag.vel:Dot(n)
-						rag.vel = (rag.vel - 2 * rag.vel:Dot(n) * n) * 0.45
-						rag.pos = wallHit.Position + n * 1.45
-						rag.angVel = rag.angVel + V((math.random() - 0.5) * 9, (math.random() - 0.5) * 8, (math.random() - 0.5) * 9)
-						if CONFIG.WALL_SLAM_ENABLED and not rag.wallSlammed and impact > 18 then
-							rag.wallSlammed = true
-							spawnImpactFlash(wallHit.Position, CONFIG.BEAM_CYAN, 1.0, 4.4, 0.22)
-							playSFX("PUNCH", 0.85, 0.9, "PARRY")
-							addStyleBonus("WALL SPLAT", 150, CONFIG.BEAM_CYAN)
-						end
-					else
-						rag.pos = rag.pos + disp
-					end
-				end
-
-				local floorY = sampleFloorY(rag.pos, targetChar, rp)
-				local minY = rag.isPushOnly and (floorY + (rag.standTorsoOffset or 2.8)) or (floorY + 0.95)
-				local grounded = false
-				if rag.pos.Y <= minY then
-					rag.pos = V(rag.pos.X, minY, rag.pos.Z)
-					grounded = true
-					if not rag.isPushOnly and rag.vel.Y < -14 then
-						rag.vel = V(rag.vel.X * 0.65, math.abs(rag.vel.Y) * 0.34, rag.vel.Z * 0.65)
-						rag.angVel = rag.angVel * 0.62
-						playSFX("LAND", 0.95, 0.55, "PARRY")
-					else
-						local dampRate = rag.isPushOnly and 2.4 or 8.0
-						local damp = math.max(0, 1 - dt * dampRate)
-						rag.vel = V(rag.vel.X * damp, 0, rag.vel.Z * damp)
-						rag.angVel = rag.angVel * math.max(0, 1 - dt * 8.5)
-					end
-				end
-
-				if rag.isPushOnly then
-					rag.rot = rag.uprightRot or rag.rot
-				else
-					local dAng = rag.angVel * dt
-					rag.rot = rag.rot * CFrame.Angles(dAng.X, dAng.Y, dAng.Z)
-					if grounded and math.abs(rag.vel.Y) < 4 then
-						local fDir = V(rag.rot.LookVector.X, 0, rag.rot.LookVector.Z)
-						if fDir.Magnitude < 0.05 then fDir = rag.flatDir end
-						rag.rot = rag.rot:Lerp(C(V(0, 0, 0), fDir.Unit) * angles(-84, 0, 0), clamp(dt * 8, 0, 1))
-					end
-				end
-
-				local torsoCF = C(rag.pos) * rag.rot
-				if hasDrive then driveTargetHRP(rag, torsoCF) end
-
-				if hasClone then
-					driveTargetMove(rag.cloneTorso, torsoCF)
-					local cfByRole = { torso = torsoCF }
-					local airF = grounded and 0 or clamp(rag.vel.Magnitude / 36, 0.25, 1)
-					local sm = clamp(dt * (grounded and 10 or 16), 0, 1)
-
-					for _, cl in ipairs(rag.clones) do
-						if cl.role ~= "torso" and cl.role ~= "acc" and cl.part and cl.part.Parent then
-							local parentCF = cfByRole[cl.parentKey] or torsoCF
-							local tRX, tRY, tRZ = 0, 0, 0
-							if cl.role == "upper" then
-								tRX, tRY, tRZ = grounded and -12 or 14, 0, math.sin(now * 9) * 8 * airF
-							elseif cl.role == "head" then
-								tRX, tRY, tRZ = grounded and -22 or math.sin(now * 10) * 18, math.cos(now * 8) * 14, 0
-							elseif cl.role == "lArm" then
-								tRX, tRY, tRZ = grounded and -28 or (math.sin(now * 14 + 0.5) * 48 * airF + 65), grounded and 18 or (math.cos(now * 11) * 24), grounded and -68 or (-55 - math.sin(now * 12) * 32 * airF)
-							elseif cl.role == "rArm" then
-								tRX, tRY, tRZ = grounded and 34 or (math.cos(now * 13 + 1.2) * 52 * airF + 70), grounded and -22 or (-math.sin(now * 10) * 24), grounded and 72 or (58 + math.cos(now * 11) * 32 * airF)
-							elseif cl.role == "lLeg" then
-								tRX, tRY, tRZ = grounded and -18 or (math.sin(now * 12 + 2.0) * 42 * airF - 24), grounded and -14 or 0, grounded and -24 or (-18 - math.sin(now * 9) * 18 * airF)
-							elseif cl.role == "rLeg" then
-								tRX, tRY, tRZ = grounded and 14 or (-math.sin(now * 12 + 2.4) * 42 * airF + 18), grounded and 16 or 0, grounded and 28 or (20 + math.cos(now * 9) * 18 * airF)
-							elseif cl.role == "lLowerArm" or cl.role == "rLowerArm" then
-								tRX = grounded and 18 or (28 + math.sin(now * 13) * 20 * airF)
-							elseif cl.role == "lLowerLeg" or cl.role == "rLowerLeg" then
-								tRX = grounded and -16 or (-32 - math.cos(now * 11) * 22 * airF)
-							end
-							cl.rx, cl.ry, cl.rz = lerp(cl.rx, tRX, sm), lerp(cl.ry, tRY, sm), lerp(cl.rz, tRZ, sm)
-							local partCF = parentCF * cl.relCF * angles(cl.rx, cl.ry, cl.rz)
-							if partCF.Position.Y < floorY + 0.45 then
-								partCF = C(partCF.Position.X, floorY + 0.45, partCF.Position.Z) * partCF.Rotation
-							end
-							cfByRole[cl.role] = partCF
-							driveTargetMove(cl.part, partCF)
-						end
-					end
-					for _, cl in ipairs(rag.clones) do
-						if cl.role == "acc" and cl.part and cl.part.Parent then
-							driveTargetMove(cl.part, (cfByRole[cl.parentKey] or torsoCF) * cl.relCF)
-						end
-					end
-				end
-			end
-		end
-	end
-
-	for _, rag in ipairs(toRestore) do task.spawn(restoreTargetRagdoll, rag) end
-end
-
--------------------------------------------------------------------
--- DASH / SLIDE / SLAM / AERIAL JUMP & WALL-KICK
--------------------------------------------------------------------
+-- ============================================================================
+-- DASH / SLIDE / SLAM / SALTO NA PAREDE E PLANAGEM
+-- ============================================================================
 local function isHumInAir(hum)
 	if not hum then return false end
 	local hState = hum:GetState()
@@ -2430,12 +1972,13 @@ local function isHumInAir(hum)
 end
 
 local function findNearbyWallNormal(c, hrp)
-	local rp = buildTargetRayParams(c)
+	local rp = buildExcludeRayParams(c)
+	local look = hrp.CFrame.LookVector
+	local right = hrp.CFrame.RightVector
 	local dirs = {
-		hrp.CFrame.LookVector,
-		-hrp.CFrame.LookVector,
-		hrp.CFrame.RightVector,
-		-hrp.CFrame.RightVector,
+		look, -look, right, -right,
+		(look + right).Unit, (look - right).Unit,
+		(-look + right).Unit, (-look - right).Unit,
 	}
 	for _, d in ipairs(dirs) do
 		local res = workspace:Raycast(hrp.Position, d * CONFIG.WALL_DETECT_DIST, rp)
@@ -2468,7 +2011,7 @@ local function handleJumpAction()
 		return
 	end
 
-	-- 2. Dash-Jump / Slide-Jump Momentum Preservation
+	-- 2. Dash-Jump / Slide-Jump preservando momento horizontal
 	if not isAir and (STATE.dash.active or STATE.slide.active) then
 		local boostDir = (hum.MoveDirection.Magnitude > 0.1) and V(hum.MoveDirection.X, 0, hum.MoveDirection.Z).Unit or (STATE.dash.active and STATE.dash.dir or STATE.slide.dir)
 		local boostSpd = math.max(STATE.airVelXZ.Magnitude, CONFIG.DASH_SPEED * CONFIG.DASH_JUMP_MULT)
@@ -2481,10 +2024,11 @@ local function handleJumpAction()
 		return
 	end
 
-	-- 3. Mid-Air Wall-Kick
-	if isAir and CONFIG.WALL_JUMP_ENABLED and STATE.wallJumpsLeft > 0 then
+	-- 3. Wall-Kick no ar (com debounce rapido para evitar consumo duplo)
+	if isAir and CONFIG.WALL_JUMP_ENABLED and STATE.wallJumpsLeft > 0 and (now - STATE.lastWallJumpAt) > 0.14 then
 		local wallNormal, hitPos = findNearbyWallNormal(c, hrp)
 		if wallNormal then
+			STATE.lastWallJumpAt = now
 			STATE.wallJumpsLeft -= 1
 			STATE.slam.active = false
 			STATE.dash.active = false
@@ -2510,6 +2054,7 @@ function Core.triggerDash()
 	if not (hrp and hum) then return end
 
 	STATE.dash.stamina = math.max(0, STATE.dash.stamina - 1.0)
+	STATE.hud.crossHudActiveUntil = now + 1.15
 	local cam = workspace.CurrentCamera
 	local refCF = (cam and (cam.CFrame.Position - hrp.Position).Magnitude < 3.0) and cam.CFrame or hrp.CFrame
 	local flatLook = V(refCF.LookVector.X, 0, refCF.LookVector.Z)
@@ -2545,7 +2090,7 @@ function Core.triggerSlideOrSlam()
 	local isAir = isHumInAir(hum)
 
 	if isAir then
-		local floorRes = workspace:Raycast(hrp.Position, V(0, -400, 0), buildTargetRayParams(c))
+		local floorRes = workspace:Raycast(hrp.Position, V(0, -400, 0), buildExcludeRayParams(c))
 		local dropHeight = floorRes and (hrp.Position.Y - floorRes.Position.Y) or 60
 		STATE.slide.active, STATE.slide.startTime = true, now
 		STATE.slam.active, STATE.slam.startTime = true, now
@@ -2572,9 +2117,9 @@ function Core.triggerSlideOrSlam()
 	playSFX("STEP", 0.62, 1.0, "DASH")
 end
 
--------------------------------------------------------------------
--- DISPATCH F3X COM SEQUENCIAMENTO (RIG + ALVOS ISOLADOS)
--------------------------------------------------------------------
+-- ============================================================================
+-- DISPATCH F3X DO RIG COM SEQUENCIAMENTO (seq/ack)
+-- ============================================================================
 local function cfDiffExceeds(a, b, posEps, rotEpsDeg)
 	if (a.Position - b.Position).Magnitude >= posEps then return true end
 	if math.acos(clamp(a.LookVector:Dot(b.LookVector), -1, 1)) >= rad(rotEpsDeg) then return true end
@@ -2636,49 +2181,9 @@ local function dispatchF3X(now)
 	end)
 end
 
-local function dispatchTargetF3X(now)
-	if not STATE then return end
-	if STATE.targetInFlight > 0 and (now - STATE.targetInFlightSince) > 1.5 then STATE.targetInFlight = 0 end
-	if (now - STATE.targetLastSendAt) < 0.04 or STATE.targetInFlight >= 1 then return end
-
-	local ep = Core.getEndpoint()
-	if not ep then return end
-
-	local payload, sent = {}, {}
-	for part, b in pairs(STATE.activeTargetMoves) do
-		if not (part and part.Parent) then
-			STATE.activeTargetMoves[part] = nil
-		elseif isDirty(b) then
-			STATE.seqCounter += 1
-			b.sendSeq = STATE.seqCounter
-			b.pendingCF = b.targetCF
-			payload[#payload + 1] = { Part = b.part, CFrame = b.targetCF }
-			sent[#sent + 1] = { block = b, cf = b.targetCF, seq = b.sendSeq }
-		end
-	end
-	if #payload == 0 then return end
-
-	STATE.targetLastSendAt = now
-	STATE.targetInFlight += 1
-	STATE.targetInFlightSince = now
-
-	task.spawn(function()
-		local ok, res = pcall(function() return ep:InvokeServer("SyncMove", payload) end)
-		if not STATE then return end
-		STATE.targetInFlight = math.max(0, STATE.targetInFlight - 1)
-		if ok and res ~= false then
-			for _, e in ipairs(sent) do
-				if e.seq > e.block.ackSeq then
-					e.block.ackSeq, e.block.serverCF = e.seq, e.cf
-				end
-			end
-		end
-	end)
-end
-
--------------------------------------------------------------------
--- SETUP E CLEANUP DO RIG
--------------------------------------------------------------------
+-- ============================================================================
+-- SETUP, VERIFICACAO E CLEANUP DO RIG
+-- ============================================================================
 local function waitForCharacterReady(c, mySetupId)
 	local t0 = os.clock()
 	while STATE and STATE.alive and STATE.setupId == mySetupId and not c:IsDescendantOf(workspace) and (os.clock() - t0) < 5.0 do
@@ -2723,7 +2228,6 @@ local function cleanupRigParts(ep)
 	if not ep or not ep.Parent then ep = getF3XEndpoint() end
 
 	destroyAirPhysics()
-	restoreAllRagdolls()
 	for _, ncc in ipairs(STATE.noColConstraints) do pcall(function() ncc:Destroy() end) end
 	STATE.noColConstraints = {}
 	clearProxyConnections()
@@ -2779,9 +2283,8 @@ local function cleanupRigParts(ep)
 	STATE.modelEntries = {}
 	STATE.buckets = {}
 	STATE.coinPart, STATE.beam1Part, STATE.beam2Part, STATE.beamCore1Part, STATE.beamCore2Part = nil, nil, nil, nil, nil
-	STATE.flashPart, STATE.impactPart, STATE.ringPart, STATE.seatPart, STATE.ramPart = nil, nil, nil, nil, nil
-	STATE.seatBusy, STATE.ramBusy = false, false
-	STATE.flashTokens, STATE.flashOriginals = {}, {}
+	STATE.flashPart, STATE.impactPart, STATE.ringPart = nil, nil, nil
+	STATE.killedTargets = {}
 	STATE.dash.active, STATE.slide.active, STATE.slam.active = false, false, false
 	STATE.flashAnim.active, STATE.impactAnim.active, STATE.ringAnim.active, STATE.beamAnim.active = false, false, false, false
 
@@ -2836,8 +2339,6 @@ setupRig = function()
 		end
 		STATE.ep = ep
 		STATE.inFlight, STATE.lastSendAt = 0, 0
-		STATE.targetInFlight, STATE.targetInFlightSince, STATE.targetLastSendAt = 0, 0, 0
-		STATE.ramPart, STATE.ramBusy, STATE.seatBusy = nil, false, false
 
 		cleanupRigParts(ep)
 		setupSounds()
@@ -2851,7 +2352,8 @@ setupRig = function()
 		local _, initYaw, _ = hrp.CFrame:ToEulerAnglesYXZ()
 		STATE.lastYaw = initYaw
 		STATE.lastHealth = hum.Health
-		STATE.hardDamage = hum.Health
+		STATE.softDamage = hum.Health
+		STATE.hardDamageAmt = 0
 		STATE.dash.stamina = CONFIG.MAX_STAMINA
 		STATE.wallJumpsLeft = CONFIG.MAX_WALL_JUMPS
 		STATE.airVelXZ = V(0, 0, 0)
@@ -2925,6 +2427,7 @@ setupRig = function()
 		local specs = CHAR_DEF.buildModel(Core, c, hrp, hum, torsoInitCF) or {}
 		for _, asp in ipairs(accSpecs) do specs[#specs + 1] = asp end
 
+		-- Partes de FX compartilhadas (sem partes antigas de seat/ram)
 		specs[#specs + 1] = { kind = "fx_coin",   partType = "Cylinder", origCF = PARK_CF, origSize = V(0.14, 0.60, 0.60), origColor = CONFIG.COIN_GOLD,   origMaterial = Enum.Material.Neon, origTrans = 1, origReflectance = 0 }
 		specs[#specs + 1] = { kind = "fx_beam1",  partType = "Normal",   origCF = PARK_CF, origSize = V(0.22, 0.22, 1),    origColor = CONFIG.YELLOW_NEON, origMaterial = Enum.Material.Neon, origTrans = 1, origReflectance = 0 }
 		specs[#specs + 1] = { kind = "fx_beam2",  partType = "Normal",   origCF = PARK_CF, origSize = V(0.38, 0.38, 1),    origColor = CONFIG.BEAM_CYAN,   origMaterial = Enum.Material.Neon, origTrans = 1, origReflectance = 0 }
@@ -2933,8 +2436,6 @@ setupRig = function()
 		specs[#specs + 1] = { kind = "fx_flash",  partType = "Ball",     origCF = PARK_CF, origSize = V(1.2, 1.2, 1.2),    origColor = CONFIG.PARRY_FLASH, origMaterial = Enum.Material.Neon, origTrans = 1, origReflectance = 0 }
 		specs[#specs + 1] = { kind = "fx_impact", partType = "Ball",     origCF = PARK_CF, origSize = V(1.6, 1.6, 1.6),    origColor = CONFIG.BEAM_CYAN,   origMaterial = Enum.Material.Neon, origTrans = 1, origReflectance = 0 }
 		specs[#specs + 1] = { kind = "fx_ring",   partType = "Cylinder", origCF = PARK_CF, origSize = V(0.14, 1.6, 1.6),   origColor = CONFIG.BEAM_CYAN,   origMaterial = Enum.Material.Neon, origTrans = 1, origReflectance = 0 }
-		specs[#specs + 1] = { kind = "fx_seat",   partType = "Seat",     origCF = PARK_CF, origSize = V(4.8, 3.2, 4.8),    origColor = CONFIG.BEAM_CYAN,   origMaterial = Enum.Material.SmoothPlastic, origTrans = 1, origReflectance = 0, allowTouch = false }
-		specs[#specs + 1] = { kind = "fx_ram",    partType = "Normal",   origCF = PARK_CF, origSize = V(6.5, 6.5, 6.5),    origColor = CONFIG.BEAM_CYAN,   origMaterial = Enum.Material.SmoothPlastic, origTrans = 1, origReflectance = 0, allowTouch = true }
 
 		local function spawnSpecsBatch(specList)
 			local tasks = {}
@@ -2944,7 +2445,7 @@ setupRig = function()
 					local ok, p = f3x(ep, "CreatePart", spec.partType or "Normal", PARK_CF, workspace)
 					if ok and typeof(p) == "Instance" and p:IsA("BasePart") then
 						lockProxyPhysics(p)
-						attachNoColToCharacter(p, c, spec.allowTouch)
+						attachNoColToCharacter(p, c)
 						createdThisSetup[#createdThisSetup + 1] = p
 						STATE.proxyParts[#STATE.proxyParts + 1] = p
 						spec.newPart = p
@@ -2960,7 +2461,7 @@ setupRig = function()
 			if not spec.newPart then missingSpecs[#missingSpecs + 1] = spec end
 		end
 		if #missingSpecs > 0 and STATE and STATE.alive and STATE.setupId == mySetupId then
-			task.wait(0.12)
+			task.wait(0.10)
 			spawnSpecsBatch(missingSpecs)
 		end
 
@@ -2974,7 +2475,6 @@ setupRig = function()
 			local p = spec.newPart
 			if p and p.Parent then
 				lockProxyPhysics(p)
-				if spec.allowTouch then p.CanTouch = true end
 				resizeItems[#resizeItems + 1] = { Part = p, Size = spec.origSize, CFrame = spec.origCF }
 				colorItems[#colorItems + 1] = { Part = p, Color = spec.origColor, UnionColoring = true }
 				matItems[#matItems + 1] = { Part = p, Material = spec.origMaterial, Transparency = spec.origTrans or 0, Reflectance = spec.origReflectance or 0 }
@@ -3005,6 +2505,7 @@ setupRig = function()
 			end
 		end
 
+		-- Trava ancora e colisao primeiro em paralelo antes de posicionar
 		local lockTasks = {}
 		for _, ch in ipairs(chunked(anchorItems, CONFIG.SYNC_CHUNK)) do lockTasks[#lockTasks + 1] = function() f3x(ep, "SyncAnchor", ch) end end
 		for _, ch in ipairs(chunked(colItems, CONFIG.SYNC_CHUNK)) do lockTasks[#lockTasks + 1] = function() f3x(ep, "SyncCollision", ch) end end
@@ -3030,12 +2531,27 @@ setupRig = function()
 			function() if #syncLightQueue > 0 then f3x(ep, "SyncLighting", syncLightQueue) end end,
 		}, 2, 6)
 
+		-- Verificacao final de integridade do rig (garante Anchored = true e CanCollide = false)
+		local fixAnchors, fixCols, verifiedCount = {}, {}, 0
 		for _, entry in ipairs(pendingEntries) do
-			if entry.part and entry.part.Parent then
-				entry.part.CFrame = entry.targetCF
+			local p = entry.part
+			if p and p.Parent then
+				p.CFrame = entry.targetCF
 				entry.serverCF = entry.targetCF
 				entry.pendingCF = entry.targetCF
+				if not p.Anchored then
+					p.Anchored = true
+					fixAnchors[#fixAnchors + 1] = { Part = p, Anchored = true }
+				end
+				if p.CanCollide then
+					p.CanCollide = false
+					fixCols[#fixCols + 1] = { Part = p, CanCollide = false }
+				end
+				if p.Anchored and not p.CanCollide then
+					verifiedCount += 1
+				end
 			end
+
 			if entry.kind == "acc" then
 				STATE.proxyAccessories[#STATE.proxyAccessories + 1] = entry
 			elseif entry.kind == "fx_coin" then STATE.coinPart = entry
@@ -3046,8 +2562,6 @@ setupRig = function()
 			elseif entry.kind == "fx_flash" then STATE.flashPart = entry
 			elseif entry.kind == "fx_impact" then STATE.impactPart = entry
 			elseif entry.kind == "fx_ring" then STATE.ringPart = entry
-			elseif entry.kind == "fx_seat" then STATE.seatPart = entry
-			elseif entry.kind == "fx_ram" then STATE.ramPart = entry
 			else
 				STATE.modelEntries[#STATE.modelEntries + 1] = entry
 				STATE.buckets[entry.kind] = STATE.buckets[entry.kind] or {}
@@ -3055,10 +2569,17 @@ setupRig = function()
 			end
 		end
 
+		if #fixAnchors > 0 or #fixCols > 0 then
+			runParallelBatched({
+				function() if #fixAnchors > 0 then f3x(ep, "SyncAnchor", fixAnchors) end end,
+				function() if #fixCols > 0 then f3x(ep, "SyncCollision", fixCols) end end,
+			}, 2, 4)
+		end
+
 		if CHAR_DEF.onSetupComplete then CHAR_DEF.onSetupComplete(Core) end
-				startBGM(CONFIG.BGM_URL, CONFIG.BGM_FILE, CONFIG.BGM_FALLBACK_ID, CONFIG.BGM_VOLUME, CONFIG.BGM_PITCH)
-		print(string.format("[F3X Ultrakill - %s] Ready (%s): %d/%d parts | KB+Seat+Ram=%s",
-			tostring(CHAR_DEF.name or CHAR_DEF.id), STATE.rigType, #STATE.proxyParts, #specs, tostring(STATE.seatPart ~= nil and STATE.ramPart ~= nil)))
+		startBGM(CONFIG.BGM_URL, CONFIG.BGM_FILE, CONFIG.BGM_FALLBACK_ID, CONFIG.BGM_VOLUME, CONFIG.BGM_PITCH)
+		print(string.format("[F3X Ultrakill - %s] Ready (%s): %d/%d parts | Verified=%d | Mode=TorsoKill",
+			tostring(CHAR_DEF.name or CHAR_DEF.id), STATE.rigType, #STATE.proxyParts, #specs, verifiedCount))
 
 		clearCharConnections()
 		table.insert(STATE.charConnections, hum.Died:Connect(function()
@@ -3066,7 +2587,6 @@ setupRig = function()
 				local curEp = Core.getEndpoint()
 				task.spawn(function()
 					destroyAirPhysics()
-					restoreAllRagdolls()
 					cleanupRigParts(curEp)
 				end)
 			end
@@ -3098,9 +2618,7 @@ forceRebuild = function()
 	STATE.setupId += 1
 	STATE.isSettingUp = false
 	STATE.inFlight, STATE.lastSendAt = 0, 0
-	STATE.targetInFlight, STATE.targetLastSendAt = 0, 0
-	STATE.ramBusy, STATE.seatBusy = false, false
-	restoreAllRagdolls()
+	STATE.killedTargets = {}
 	task.spawn(setupRig)
 end
 
@@ -3134,11 +2652,14 @@ cleanup = function()
 	for _, key in ipairs({ "F3XUltrakillCleanup", "F3XV1ReanimCleanup", "F3XV2ReanimCleanup" }) do
 		if env[key] == cleanup then env[key] = nil end
 	end
+	if type(env.ULTRAKILL_F3X) == "table" and env.ULTRAKILL_F3X.cleanup == cleanup then
+		env.ULTRAKILL_F3X = nil
+	end
 end
 
--------------------------------------------------------------------
--- INITIALIZE CHARACTER MODULE
--------------------------------------------------------------------
+-- ============================================================================
+-- INICIALIZACAO DO MODULO DE PERSONAGEM
+-- ============================================================================
 function Core.start(charDef)
 	for _, key in ipairs({ "F3XUltrakillCleanup", "F3XV1ReanimCleanup", "F3XV2ReanimCleanup", "F3XR6ReanimCleanup", "F3XMayhemIdleCleanup" }) do
 		if type(env[key]) == "function" then pcall(env[key]) end
@@ -3158,12 +2679,14 @@ function Core.start(charDef)
 		walkCycle = 0, prevWalkSin = 0, walkBlend = 0, sprintBlend = 0, airBlend = 0,
 		airTime = 0, wasAir = false, landRecover = 0, localFwd = 0, localStrafe = 0,
 		vertVel = 0, lastYaw = 0, turnRate = 0, touchedWalkSpeed = false,
-		hardDamage = 0, lastHealth = 100, camShake = 0, fovKick = 0,
+		softDamage = 100, hardDamageAmt = 0, hardDamageHoldUntil = 0, lastHealth = 100, camShake = 0, fovKick = 0,
 
 		isGliding = false,
 		airVelXZ = V(0, 0, 0),
 		wallJumpsLeft = CONFIG.MAX_WALL_JUMPS,
+		lastWallJumpAt = 0,
 		lastSlamLand = 0,
+		lastSlamImpactAt = 0,
 		slamStored = false,
 		antiGravAtt = nil,
 		antiGravForce = nil,
@@ -3173,11 +2696,12 @@ function Core.start(charDef)
 		sfxFolder = nil, soundTemplates = {}, activeSounds = {},
 
 		coinPart = nil, beam1Part = nil, beam2Part = nil, beamCore1Part = nil, beamCore2Part = nil,
-		flashPart = nil, impactPart = nil, ringPart = nil, seatPart = nil, ramPart = nil,
-		seatBusy = false, ramBusy = false,
+		flashPart = nil, impactPart = nil, ringPart = nil,
 
-		knownHumanoids = {}, flashTokens = {}, flashOriginals = {},
-		ragdollingTargets = {}, activeTargetMoves = {},
+		knownHumanoids = {},
+		killedTargets = {},
+		killStreak = 0,
+		lastKillAt = 0,
 
 		fpArms = false, fpHideArms = false, mobileSprint = false,
 		dash = { active = false, lastUsed = 0, startTime = 0, dir = V(0, 0, -1), localDir = V(0, 0, -1), stamina = CONFIG.MAX_STAMINA },
@@ -3192,17 +2716,19 @@ function Core.start(charDef)
 
 		hud = {
 			folder = nil, leftPart = nil, rightPart = nil, leftGui = nil, rightGui = nil,
-			crossGui = nil, mobGui = nil, hitmarker = nil, hint = nil, wpnTitle = nil, wpnStroke = nil, keyHint = nil,
-			hpFill = nil, hardDmgFill = nil, hpText = nil, speedLabel = nil,
-			stamBars = {}, coinPips = {},
-			rankBadge = nil, rankTitle = nil, rankBarFill = nil, multLabel = nil,
-			styleFeed = nil, rightFrame = nil,
+			crossGui = nil, mobGui = nil, hitmarker = nil, hint = nil, wpnTitle = nil, wpnAccent = nil, wpnBox = nil,
+			hpFill = nil, softDmgFill = nil, hardDmgFill = nil, overhealFill = nil, hpText = nil, speedBox = nil, speedLabel = nil,
+			stamBars = {}, coinPips = {}, railFill = nil, armBarFill = nil, armIconWrap = nil, armAccent = nil,
+			rankLabel = nil, rankBarFill = nil, multLabel = nil, multBarFill = nil, freshLabel = nil,
+			styleFeed = nil, rightFrame = nil, helpPanel = nil,
+			crossHpFill = nil, crossSoftFill = nil, crossHardFill = nil, crossStamBars = {},
+			crossHudLeft = nil, crossHudRight = nil, crossHudAlpha = 0.78, crossHudActiveUntil = 0,
+			armPulseUntil = 0, wpnPulseUntil = 0,
 			stylePoints = 0, styleMult = 1.0, stylePop = 0, styleFeedEntries = {}, hitmarkerUntil = 0,
 			swayYaw = 0, swayPitch = 0, swayX = 0, swayY = 0, prevCamLook = nil,
 		},
 
 		inFlight = 0, inFlightSince = 0, lastSendAt = 0, avgRTT = 0, seqCounter = 0,
-		targetInFlight = 0, targetInFlightSince = 0, targetLastSendAt = 0,
 		hitstopUntil = 0, hitstopDur = 0.10, hitstopCC = nil,
 		connections = {}, charConnections = {}, proxyConnections = {},
 		custom = {},
@@ -3214,22 +2740,17 @@ function Core.start(charDef)
 	env.F3XUltrakillRebuild = forceRebuild
 	env.F3XV1ReanimCleanup = cleanup
 	env.F3XV1ReanimRebuild = forceRebuild
+	env.ULTRAKILL_F3X = { cleanup = cleanup, rebuild = forceRebuild }
 
 	initTargetTracker()
 	task.spawn(setupRig)
 
+	-- Mantem partes do rig estritamente ancoradas e sem colisao
 	table.insert(STATE.connections, RunService.Stepped:Connect(function()
 		if not (STATE and STATE.alive) then return end
 		for _, p in ipairs(STATE.proxyParts) do
 			if p and p.Parent then
-				local mode = isCombatPhysicsActive(p)
-				if not mode then
-					p.Anchored, p.CanCollide, p.CanTouch, p.CanQuery = true, false, false, false
-				elseif mode == "seat" then
-					p.CanCollide, p.CanTouch, p.CanQuery = false, true, false
-				elseif mode == "ram" then
-					p.CanCollide, p.CanTouch, p.CanQuery = true, true, false
-				end
+				p.Anchored, p.CanCollide, p.CanTouch, p.CanQuery = true, false, false, false
 			end
 		end
 
@@ -3265,8 +2786,8 @@ function Core.start(charDef)
 		if STATE.hitstopCC and STATE.hitstopCC.Parent then
 			if inHitstop then
 				local rem = clamp((STATE.hitstopUntil - nowClock) / math.max(0.01, STATE.hitstopDur), 0, 1)
-				STATE.hitstopCC.Brightness = 0.28 * rem
-				STATE.hitstopCC.Contrast = 0.35 * rem
+				STATE.hitstopCC.Brightness = 0.24 * rem
+				STATE.hitstopCC.Contrast = 0.30 * rem
 				STATE.hitstopCC.TintColor = Color3.new(1, 1, 1):Lerp(STATE.hitstopCC.TintColor, rem)
 			elseif STATE.hitstopCC.Enabled then
 				STATE.hitstopCC.Brightness = 0
@@ -3296,6 +2817,7 @@ function Core.start(charDef)
 				STATE.slam.active = false
 				STATE.slamArmed = false
 				STATE.lastSlamLand = nowClock
+				STATE.lastSlamImpactAt = nowClock
 				STATE.slamStored = true
 				STATE.landRecover = 1.4
 				STATE.camShake = math.max(STATE.camShake, 0.75)
@@ -3397,7 +2919,7 @@ function Core.start(charDef)
 			end
 		end
 
-		-- Floaty Air Physics + Wing Glide + Uncapped Air-Strafe
+		-- Fisica aerea flutuante + planagem com asas + Air-Strafe livre
 		if CONFIG.ENABLE_AIR_MOVEMENT and STATE.antiGravForce and STATE.antiGravForce.Parent then
 			if isAir and not STATE.slam.active and not STATE.dash.active then
 				local holdingJump = (not typing) and (UIS:IsKeyDown(Enum.KeyCode.Space) or hum.Jump)
@@ -3450,7 +2972,7 @@ function Core.start(charDef)
 			end
 		end
 
-		-- Animação dos feixes e efeitos compartilhados
+		-- Animacao dos feixes e efeitos compartilhados
 		local ba = STATE.beamAnim
 		if ba.active and STATE.beam1Part and STATE.beam2Part then
 			local bEl = nowClock - ba.startTime
@@ -3539,11 +3061,8 @@ function Core.start(charDef)
 			end
 		end
 
-		updateHUD(hum, hrp, dt, hudStatus)
-		if not inHitstop then stepTargetRagdolls(dt) end
-		local syncNow = os.clock()
-		dispatchF3X(syncNow)
-		dispatchTargetF3X(syncNow)
+		updateHUD(hum, hrp, dt, isAir, hudStatus)
+		dispatchF3X(os.clock())
 	end)
 
 	table.insert(STATE.connections, UIS.InputBegan:Connect(function(inp, gp)
@@ -3564,11 +3083,19 @@ function Core.start(charDef)
 		elseif inp.KeyCode == Enum.KeyCode.C or inp.KeyCode == Enum.KeyCode.LeftControl then
 			Core.triggerSlideOrSlam()
 		elseif inp.KeyCode == Enum.KeyCode.E then
+			triggerHUDWeaponPulse()
 			if CHAR_DEF and CHAR_DEF.onPrimary then CHAR_DEF.onPrimary(Core) end
 		elseif inp.KeyCode == Enum.KeyCode.F then
+			triggerHUDArmPulse()
 			if CHAR_DEF and CHAR_DEF.onSecondary then CHAR_DEF.onSecondary(Core) end
 		elseif inp.KeyCode == Enum.KeyCode.R then
+			triggerHUDWeaponPulse()
 			if CHAR_DEF and CHAR_DEF.onTertiary then CHAR_DEF.onTertiary(Core) end
+		elseif inp.KeyCode == Enum.KeyCode.H then
+			if STATE.hud.helpPanel then
+				STATE.hud.helpPanel.Visible = not STATE.hud.helpPanel.Visible
+			end
+			return
 		elseif inp.KeyCode == Enum.KeyCode.M then
 			toggleBGMMute()
 			return
@@ -3577,7 +3104,7 @@ function Core.start(charDef)
 			local hint = STATE.hud.hint
 			if hint then
 				hint.Text = STATE.fpHideArms and "[X] 1P ARMS: OFF" or "[X] 1P ARMS: ON"
-				hint.TextColor3 = STATE.fpHideArms and CONFIG.BEAM_CYAN or CONFIG.HUD_WEAPON_COLOR
+				hint.TextColor3 = STATE.fpHideArms and UK_COLOR.RailFull or UK_COLOR.TextDim
 			end
 			return
 		end
@@ -3594,16 +3121,14 @@ function Core.start(charDef)
 		STATE.setupId += 1
 		STATE.isSettingUp = false
 		STATE.inFlight, STATE.lastSendAt = 0, 0
-		STATE.targetInFlight, STATE.targetLastSendAt = 0, 0
-		STATE.ramBusy, STATE.seatBusy = false, false
 		STATE.walkBlend, STATE.sprintBlend, STATE.airBlend = 0, 0, 0
 		STATE.slide.active, STATE.slam.active = false, false
 		STATE.isGliding, STATE.slamStored = false, false
 		STATE.airVelXZ = V(0, 0, 0)
+		STATE.killedTargets = {}
 		destroyAirPhysics()
 		clearCharConnections()
 		clearProxyConnections()
-		restoreAllRagdolls()
 		if STATE.alive then task.spawn(setupRig) end
 	end))
 end
