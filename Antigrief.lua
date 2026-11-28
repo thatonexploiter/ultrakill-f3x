@@ -1442,20 +1442,28 @@ return function(ctx)
 		local removed = batchRemove(endpoint, toRemove)
 		if removed > 0 then
 			agState.threatsBlocked += removed
-			Engine.logEvent("Area sweep cleared " .. removed .. " foreign items", "BLOCK")
+			Engine.logEvent("Cleared " .. removed .. " items within " .. r .. " studs", "BLOCK")
 			if UI.updateTelemetry then UI.updateTelemetry() end
 		end
-		return removed, "Cleared " .. removed .. " nearby items"
+		return removed, "Cleared " .. removed .. " items"
 	end
 
 	function Engine.restoreMap(endpoint)
 		if not endpoint then return "F3X not found" end
 		local snap = getActiveSnapshot()
-		if not snap then return "No snapshot in Slot " .. agState.activeSlot end
-		if Runtime.restoreInFlight then return "Restore already running" end
+		if not snap then
+			local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			if hrp and createFallbackBaseplate(endpoint, hrp.Position) then
+				return "No snapshot: spawned rescue pad"
+			end
+			return "No snapshot in Slot " .. agState.activeSlot
+		end
+		while Runtime.restoreInFlight and agAlive do
+			task.wait(0.03)
+		end
+		if not agAlive then return "Aborted" end
 
 		Runtime.restoreInFlight = true
-		agState.isBusy = true
 		beginSelfRestoring()
 
 		local okRun, summary = pcall(function()
@@ -1472,7 +1480,6 @@ return function(ctx)
 				end
 			end
 
-			-- 1. Recover missing containers, meshes, joints, and deleted parts via UndoRemove first
 			local undoTargets = {}
 			local missingParts = {}
 			for anc in pairs(snap.containers) do
@@ -1501,11 +1508,13 @@ return function(ctx)
 				batchInvoke(endpoint, "UndoRemove", undoTargets, AG_CONFIG.BatchSize)
 			end
 
-			-- 2. Rebuild any parts that failed UndoRemove via CreatePart
 			local rebuiltMap = {}
 			local rebuildQueue = {}
+			local undoneCount = 0
 			for _, oldPart in ipairs(missingParts) do
-				if not oldPart or oldPart.Parent == nil or not oldPart:IsDescendantOf(workspace) then
+				if oldPart and oldPart.Parent ~= nil and oldPart:IsDescendantOf(workspace) then
+					undoneCount += 1
+				else
 					local data = snap.parts[oldPart]
 					if data then
 						table.insert(rebuildQueue, { oldPart = oldPart, data = data })
@@ -1568,7 +1577,6 @@ return function(ctx)
 					end)
 				end
 
-				-- Re-map snapshot entries to rebuilt parts
 				local updated = false
 				for oldPart, newPart in pairs(rebuiltMap) do
 					local d = snap.parts[oldPart]
@@ -1587,7 +1595,6 @@ return function(ctx)
 				end
 			end
 
-			-- 3. Sync remaining tampered parts (SyncAnchor first, then Sync* in parallel)
 			if #diff.reanchored > 0 then
 				batchInvoke(endpoint, "SyncAnchor", diff.reanchored)
 			end
@@ -1612,7 +1619,6 @@ return function(ctx)
 				batchLockParts(endpoint, lockUndoList, true)
 			end
 
-			-- 4. Remove foreign spam / grief objects
 			local removeQueue = {}
 			local mode = getFilterMode()
 			for _, fx in ipairs(diff.foreignEffects) do
@@ -1631,70 +1637,159 @@ return function(ctx)
 			end
 			local removed = batchRemove(endpoint, removeQueue)
 
-			local fixed = #diff.moved + #diff.resized + #diff.recolored + #diff.rematerialed + #diff.reanchored + #diff.recollided + rebuiltCount
-			if fixed > 0 then agState.restoresPerformed += fixed end
+			agState.restoresPerformed += 1
 			if removed > 0 then agState.threatsBlocked += removed end
 
-			return ("Restored %d props (%d rebuilt) | Purged %d"):format(fixed, rebuiltCount, removed)
+			return ("Restored (Undone: %d, Rebuilt: %d)"):format(undoneCount, rebuiltCount)
 		end)
 
 		endSelfRestoring()
-		agState.isBusy = false
 		Runtime.restoreInFlight = false
 
 		local msg = okRun and summary or ("Restore error: " .. tostring(summary))
 		Engine.logEvent(msg, okRun and "RESTORE" or "WARN")
 		if UI.updateTelemetry then UI.updateTelemetry() end
+		if UI.refreshSlotButtons then UI.refreshSlotButtons() end
+		return msg
+	end
+	Engine.fullRestoreMap = Engine.restoreMap
+
+	function Engine.lockMap(endpoint, locked)
+		if not endpoint then return "F3X not found" end
+		local snap = getActiveSnapshot()
+		local targets = {}
+		if snap then
+			for part, data in pairs(snap.parts) do
+				if part and part.Parent ~= nil then
+					table.insert(targets, part)
+					data.Locked = locked
+				end
+			end
+		else
+			for _, desc in ipairs(workspace:GetDescendants()) do
+				if desc:IsA("BasePart") and not isProtectedWorldSystem(desc) and not isPlayerCharacterDescendant(desc) and not isOwnRigPart(desc) then
+					table.insert(targets, desc)
+				end
+			end
+		end
+		batchLockParts(endpoint, targets, locked)
+		local verb = locked and "Locked " or "Unlocked "
+		Engine.logEvent(verb .. #targets .. " parts", "INFO")
+		return verb .. #targets .. " parts"
+	end
+
+	function Engine.lockSelfCharacterParts(endpoint, locked)
+		if not endpoint then return "F3X not found" end
+		local char = LocalPlayer.Character
+		if not char then return "No character" end
+		local parts = {}
+		for _, desc in ipairs(char:GetDescendants()) do
+			if desc:IsA("BasePart") then
+				table.insert(parts, desc)
+			end
+		end
+		batchLockParts(endpoint, parts, locked)
+		local msg = (locked and "Locked " or "Unlocked ") .. #parts .. " self parts"
+		Engine.logEvent(msg, "SHIELD")
 		return msg
 	end
 
+	function Engine.rescueCharacter(endpoint)
+		local char = LocalPlayer.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if not hrp then return "No character" end
+
+		hrp.AssemblyLinearVelocity = Vector3.zero
+		hrp.AssemblyAngularVelocity = Vector3.zero
+
+		if agState.lastSafeCFrame then
+			local rayParams = RaycastParams.new()
+			rayParams.FilterType = Enum.RaycastFilterType.Exclude
+			rayParams.FilterDescendantsInstances = { char }
+			local origin = agState.lastSafeCFrame.Position + Vector3.new(0, 3, 0)
+			local hit = workspace:Raycast(origin, Vector3.new(0, -24, 0), rayParams)
+			if hit and hit.Instance and hit.Instance.CanCollide then
+				hrp.CFrame = agState.lastSafeCFrame + Vector3.new(0, 4, 0)
+				Engine.logEvent("Rescued to verified safe spot", "SHIELD")
+				return "Teleported to safe spot"
+			end
+		end
+
+		if endpoint then
+			local safeY = math.max(hrp.Position.Y, 12)
+			local padPos = Vector3.new(hrp.Position.X, safeY, hrp.Position.Z)
+			createFallbackBaseplate(endpoint, padPos)
+			hrp.CFrame = CFrame.new(padPos.X, padPos.Y + 4, padPos.Z)
+			Engine.logEvent("Floor missing: spawned emergency pad", "SHIELD")
+			return "Spawned rescue pad"
+		end
+
+		if agState.lastSafeCFrame then
+			hrp.CFrame = agState.lastSafeCFrame + Vector3.new(0, 4, 0)
+			return "Teleported (no F3X)"
+		end
+		return "No safe spot or F3X"
+	end
+
 	function Engine.stripPlayerF3X(endpoint, targetPlr)
-		if not endpoint or not targetPlr or targetPlr == LocalPlayer then return 0, "Invalid target" end
+		if not endpoint or not targetPlr or targetPlr == LocalPlayer then return "Target unavailable" end
 		local targets = {}
 		local function collectTools(container)
 			if not container then return end
 			for _, item in ipairs(container:GetChildren()) do
 				if item:FindFirstChild("SyncAPI") or item:FindFirstChild("SyncApi") then
 					table.insert(targets, item)
+					local handle = item:FindFirstChild("Handle")
+					if handle then table.insert(targets, handle) end
 				end
 			end
 		end
 		collectTools(targetPlr.Character)
 		collectTools(targetPlr:FindFirstChild("Backpack"))
 		if #targets == 0 then
-			return 0, targetPlr.Name .. " has no F3X"
+			return targetPlr.Name .. " has no F3X"
 		end
 		local removed = batchRemove(endpoint, targets)
 		if removed > 0 then
 			agState.threatsBlocked += removed
-			Engine.logEvent("Stripped F3X from " .. targetPlr.Name, "COUNTER")
 			if UI.updateTelemetry then UI.updateTelemetry() end
-			if agState.windowOpen and UI.refreshRadar then task.defer(UI.refreshRadar) end
 		end
-		return removed, "Stripped F3X from " .. targetPlr.Name
+		Engine.logEvent("Disarm attempt on " .. targetPlr.Name, "COUNTER")
+		return "Attempted disarm on " .. targetPlr.Name
+	end
+
+	function Engine.uncagePlayer(endpoint, targetPlr)
+		if not targetPlr then return 0, "Invalid target" end
+		local list = Runtime.cagedPartsByUserId[targetPlr.UserId]
+		if not list or #list == 0 then return 0, targetPlr.Name .. " not caged" end
+		Runtime.cagedPartsByUserId[targetPlr.UserId] = nil
+		local removed = endpoint and batchRemove(endpoint, list) or 0
+		Engine.logEvent("Uncaged " .. targetPlr.Name, "INFO")
+		return removed, "Uncaged " .. targetPlr.Name
 	end
 
 	function Engine.cagePlayer(endpoint, targetPlr)
-		if not endpoint or not targetPlr or targetPlr == LocalPlayer then return false, "Invalid target" end
+		if not endpoint or not targetPlr or targetPlr == LocalPlayer then return "Target unavailable" end
 		local char = targetPlr.Character
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
-		if not hrp then return false, targetPlr.Name .. " has no character" end
+		if not hrp then return "No target root" end
 
 		Engine.uncagePlayer(endpoint, targetPlr)
 		beginSelfRestoring()
 
 		local center = hrp.Position
 		local wallSpecs = {
-			{ cf = CFrame.new(center + Vector3.new(0, -4.5, 0)), size = Vector3.new(10, 1, 10) },
-			{ cf = CFrame.new(center + Vector3.new(0, 5.5, 0)), size = Vector3.new(10, 1, 10) },
-			{ cf = CFrame.new(center + Vector3.new(4.5, 0.5, 0)), size = Vector3.new(1, 9, 10) },
-			{ cf = CFrame.new(center + Vector3.new(-4.5, 0.5, 0)), size = Vector3.new(1, 9, 10) },
-			{ cf = CFrame.new(center + Vector3.new(0, 0.5, 4.5)), size = Vector3.new(8, 9, 1) },
-			{ cf = CFrame.new(center + Vector3.new(0, 0.5, -4.5)), size = Vector3.new(8, 9, 1) },
+			{ cf = CFrame.new(center + Vector3.new(0, -4.5, 0)), size = Vector3.new(11, 1.5, 11) },
+			{ cf = CFrame.new(center + Vector3.new(0, 5.5, 0)), size = Vector3.new(11, 1.5, 11) },
+			{ cf = CFrame.new(center + Vector3.new(5, 0.5, 0)), size = Vector3.new(1.5, 11, 11) },
+			{ cf = CFrame.new(center + Vector3.new(-5, 0.5, 0)), size = Vector3.new(1.5, 11, 11) },
+			{ cf = CFrame.new(center + Vector3.new(0, 0.5, 5)), size = Vector3.new(11, 11, 1.5) },
+			{ cf = CFrame.new(center + Vector3.new(0, 0.5, -5)), size = Vector3.new(11, 11, 1.5) },
 		}
 
 		local created = {}
 		runParallel(#wallSpecs, 6, function(idx)
+			if not agAlive then return end
 			local spec = wallSpecs[idx]
 			local ok, part = pcall(function()
 				return endpoint:InvokeServer("CreatePart", "Normal", spec.cf, workspace)
@@ -1710,8 +1805,8 @@ return function(ctx)
 			local p, s = entry.part, entry.spec
 			table.insert(anchorBatch, { Part = p, Anchored = true })
 			table.insert(resizeBatch, { Part = p, Size = s.size, CFrame = s.cf })
-			table.insert(colorBatch, { Part = p, Color = Color3.fromRGB(204, 36, 36), UnionColoring = true })
-			table.insert(matBatch, { Part = p, Material = Enum.Material.ForceField, Transparency = 0.35, Reflectance = 0 })
+			table.insert(colorBatch, { Part = p, Color = Color3.fromRGB(220, 35, 35), UnionColoring = true })
+			table.insert(matBatch, { Part = p, Material = Enum.Material.ForceField, Transparency = 0.4, Reflectance = 0 })
 			table.insert(colBatch, { Part = p, CanCollide = true })
 			table.insert(lockBatch, p)
 			table.insert(renameList, p)
@@ -1733,40 +1828,40 @@ return function(ctx)
 		end
 
 		endSelfRestoring()
-		Engine.logEvent("Caged " .. targetPlr.Name .. " (" .. #renameList .. " walls)", "COUNTER")
-		return #renameList > 0, "Caged " .. targetPlr.Name
+		Engine.logEvent("Caged " .. targetPlr.Name .. " (" .. #renameList .. " walls)", "BLOCK")
+		return "Caged " .. targetPlr.Name
 	end
 
-	function Engine.uncagePlayer(endpoint, targetPlr)
-		if not targetPlr then return 0 end
-		local list = Runtime.cagedPartsByUserId[targetPlr.UserId]
-		if not list or #list == 0 then return 0 end
-		Runtime.cagedPartsByUserId[targetPlr.UserId] = nil
-		local removed = endpoint and batchRemove(endpoint, list) or 0
-		return removed
-	end
-
-	function Engine.nukePlayerBuilds(endpoint, targetPlr)
-		if not endpoint or not targetPlr then return 0, "Invalid target" end
-		local char = targetPlr.Character
-		local hrp = char and char:FindFirstChild("HumanoidRootPart")
-		if not hrp then return 0, targetPlr.Name .. " has no character" end
-		return Engine.clearAroundPosition(endpoint, hrp.Position, 55)
+	function Engine.destroyManagedArtifacts(endpoint)
+		if not endpoint then return 0 end
+		local toDel = {}
+		for part in pairs(Runtime.scriptManagedParts) do
+			if part and part.Parent ~= nil then
+				table.insert(toDel, part)
+			end
+		end
+		table.clear(Runtime.cagedPartsByUserId)
+		return batchRemove(endpoint, toDel)
 	end
 
 	-- ========================================================================
 	-- CHARACTER SHIELD (INSTANT UNDO + LOCK + NO-SIT + SIZE GUARD)
 	-- ========================================================================
-	local function setupCharacterShield(char)
+	local function clearCharWatchConns()
 		for _, c in ipairs(Runtime.charWatchConns) do
 			pcall(function() c:Disconnect() end)
 		end
 		table.clear(Runtime.charWatchConns)
 		table.clear(Runtime.charPartBaselineSizes)
+	end
 
+	local function watchOwnCharacter(char)
+		clearCharWatchConns()
 		if not char then return end
 		registerCharacter(LocalPlayer, char)
-		agState.f3xRequestedThisLife = false
+
+		local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 5)
+		local hrp = char:FindFirstChild("HumanoidRootPart") or char:WaitForChild("HumanoidRootPart", 5)
 
 		for _, desc in ipairs(char:GetDescendants()) do
 			if desc:IsA("BasePart") and STANDARD_CHAR_PART_NAMES[desc.Name] then
@@ -1774,54 +1869,42 @@ return function(ctx)
 			end
 		end
 
-		if agState.autoLockSelf then
-			task.delay(0.35, function()
-				if not agAlive or LocalPlayer.Character ~= char then return end
-				withF3X(false, false, function(ep)
-					local parts = {}
-					for _, d in ipairs(char:GetDescendants()) do
-						if d:IsA("BasePart") then
-							table.insert(parts, d)
-						end
-					end
-					if #parts > 0 then
-						batchLockParts(ep, parts, true)
-					end
-				end)
-			end)
-		end
-
 		table.insert(Runtime.charWatchConns, char.DescendantRemoving:Connect(function(desc)
 			if not agAlive or not agState.charShield then return end
-			if isRigDeployGraceActive() or isOwnRigPart(desc) or isOwnCoreCharacterHelper(desc) then return end
+			if isRigDeployGraceActive() or Runtime.selfRestoringDepth > 0 or isOwnRigPart(desc) or isOwnCoreCharacterHelper(desc) then return end
+			if not char.Parent then return end
+			if hum and hum.Health <= 0 and desc ~= hum then return end
 
-			local isCritical = desc:IsA("Humanoid")
+			if desc:IsA("Humanoid")
 				or (desc:IsA("BasePart") and CRITICAL_CHAR_PART_NAMES[desc.Name])
-				or (desc:IsA("JointInstance") and CRITICAL_JOINT_NAMES[desc.Name])
-
-			if isCritical then
-				local hum = char:FindFirstChildOfClass("Humanoid")
-				if hum and hum.Health <= 0 then return end
+				or (desc:IsA("JointInstance") and CRITICAL_JOINT_NAMES[desc.Name]) then
 				Runtime.pendingCharUndo[desc] = true
-				agState.threatsBlocked += 1
-				Engine.logEvent("Blocked removal of self " .. desc.Name, "BLOCK")
-				attributeThreat(char:FindFirstChild("HumanoidRootPart") and char.HumanoidRootPart.Position, 6, "CHAR_DELETE")
+				attributeThreat(hrp and hrp.Position, 6, "CHAR_DELETE")
 				task.spawn(function()
-					withF3X(false, false, function(ep)
+					local okRes = withF3X(false, true, function(ep)
+						beginSelfRestoring()
 						pcall(function()
 							ep:InvokeServer("UndoRemove", { desc })
 						end)
 						if agState.autoLockSelf and desc:IsA("BasePart") then
 							batchLockParts(ep, { desc }, true)
 						end
+						endSelfRestoring()
+						return true
 					end)
+					if okRes then
+						Runtime.pendingCharUndo[desc] = nil
+						agState.threatsBlocked += 1
+						Engine.logEvent("Instant char recovery: " .. desc.Name, "SHIELD")
+						if UI.updateTelemetry then UI.updateTelemetry() end
+					end
 				end)
 			end
 		end))
 
 		table.insert(Runtime.charWatchConns, char.DescendantAdded:Connect(function(desc)
 			if not agAlive or not agState.charShield then return end
-			if isRigDeployGraceActive() or isOwnRigPart(desc) or isOwnCoreCharacterHelper(desc) then return end
+			if isRigDeployGraceActive() or Runtime.selfRestoringDepth > 0 or isOwnRigPart(desc) or isOwnCoreCharacterHelper(desc) then return end
 
 			if desc:IsA("BasePart") and not STANDARD_CHAR_PART_NAMES[desc.Name] and not desc:FindFirstAncestorOfClass("Accessory") and not desc:FindFirstAncestorOfClass("Tool") then
 				quarantineInstanceLocally(desc)
@@ -1840,638 +1923,762 @@ return function(ctx)
 			end
 		end))
 
-		local hum = char:WaitForChild("Humanoid", 4)
 		if hum then
 			table.insert(Runtime.charWatchConns, hum:GetPropertyChangedSignal("SeatPart"):Connect(function()
 				if not agAlive or not agState.charShield then return end
 				local seat = hum.SeatPart
-				if seat then
-					local snap = getActiveSnapshot()
-					if not snap or not snap.parts[seat] then
-						quarantineInstanceLocally(seat)
-						hum.Sit = false
-						hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-						Runtime.pendingRemove[seat] = true
-						agState.threatsBlocked += 1
-						attributeThreat(seat.Position, 5, "SEAT_TRAP")
-						Engine.logEvent("Ejected from foreign seat trap!", "BLOCK")
-					end
-				end
-			end))
-		end
+				if not seat then return end
+				if isOwnRigPart(seat) then return end
+				local snap = getActiveSnapshot()
+				if snap and snap.parts[seat] then return end
+				if isWhitelistedPlayerNearby(seat.Position, 20) then return end
 
-		local hrp = char:WaitForChild("HumanoidRootPart", 4)
-		if hrp then
-			table.insert(Runtime.charWatchConns, hrp:GetPropertyChangedSignal("Anchored"):Connect(function()
-				if not agAlive or not agState.charShield or isRigDeployGraceActive() then return end
-				if hrp.Anchored and hum and hum.MoveDirection.Magnitude > 0.05 then
-					withF3X(false, false, function(ep)
-						pcall(function()
-							ep:InvokeServer("SyncAnchor", { { Part = hrp, Anchored = false } })
-						end)
-					end)
-					Engine.logEvent("Unanchored self HRP from freeze attempt", "BLOCK")
+				hum.Sit = false
+				pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+				quarantineInstanceLocally(seat)
+				if agState.autoClean then
+					Runtime.pendingRemove[seat] = true
 				end
+				attributeThreat(seat.Position, 6, "Seat Kidnap")
+				agState.threatsBlocked += 1
+				Engine.logEvent("Blocked foreign Seat trap!", "SHIELD")
+				if agState.lastSafeCFrame and hrp then
+					hrp.AssemblyLinearVelocity = Vector3.zero
+					hrp.CFrame = agState.lastSafeCFrame + Vector3.new(0, 3, 0)
+				end
+				if UI.updateTelemetry then UI.updateTelemetry() end
 			end))
 		end
 
 		for _, desc in ipairs(char:GetDescendants()) do
 			if desc:IsA("BasePart") then
-				table.insert(Runtime.charWatchConns, desc:GetPropertyChangedSignal("Locked"):Connect(function()
-					if not agAlive or not agState.charShield or not agState.autoLockSelf then return end
-					if desc.Locked == false then
-						withF3X(false, false, function(ep)
-							batchLockParts(ep, { desc }, true)
-						end)
-					end
-				end))
-				table.insert(Runtime.charWatchConns, desc:GetPropertyChangedSignal("Size"):Connect(function()
-					if not agAlive or not agState.charShield or isRigDeployGraceActive() then return end
-					local baseSize = Runtime.charPartBaselineSizes[desc]
-					if baseSize and math.max(desc.Size.X, desc.Size.Y, desc.Size.Z) > 9 then
-						withF3X(false, false, function(ep)
-							pcall(function()
-								ep:InvokeServer("SyncResize", { { Part = desc, Size = baseSize, CFrame = desc.CFrame } })
+				table.insert(Runtime.charWatchConns, desc.Changed:Connect(function(prop)
+					if not agAlive or not agState.charShield or isRigDeployGraceActive() or Runtime.selfRestoringDepth > 0 then return end
+					if prop == "Locked" and desc.Locked == false and agState.autoLockSelf then
+						task.spawn(function()
+							withF3X(false, false, function(ep)
+								batchLockParts(ep, { desc }, true)
 							end)
 						end)
-						Engine.logEvent("Reverted giant limb grief on " .. desc.Name, "BLOCK")
+					elseif prop == "Size" and CRITICAL_CHAR_PART_NAMES[desc.Name] then
+						local origSz = Runtime.charPartBaselineSizes[desc]
+						if origSz and math.max(desc.Size.X, desc.Size.Y, desc.Size.Z) > 9 then
+							task.spawn(function()
+								withF3X(false, true, function(ep)
+									beginSelfRestoring()
+									pcall(function()
+										ep:InvokeServer("SyncResize", { { Part = desc, Size = origSz, CFrame = desc.CFrame } })
+									end)
+									endSelfRestoring()
+								end)
+								Engine.logEvent("Reverted char resize on " .. desc.Name, "SHIELD")
+							end)
+						end
+					elseif prop == "Anchored" and desc == hrp and desc.Anchored == true then
+						if hum and hum.MoveDirection.Magnitude > 0.05 and not hum.SeatPart then
+							desc.Anchored = false
+							task.spawn(function()
+								withF3X(false, true, function(ep)
+									beginSelfRestoring()
+									pcall(function()
+										ep:InvokeServer("SyncAnchor", { { Part = hrp, Anchored = false } })
+									end)
+									endSelfRestoring()
+								end)
+								Engine.logEvent("Unfroze anchored HRP", "SHIELD")
+							end)
+						end
 					end
 				end))
 			end
 		end
-	end
 
-	-- ========================================================================
-	-- LIVE GUARD WORKER LOOP (BUFFERED PURGE + TAMPER SLICE + FLING + VOID)
-	-- ========================================================================
-	local function setLiveGuard(enabled)
-		agState.liveGuard = enabled
-		if enabled then
-			if not getActiveSnapshot() then
-				Engine.takeSnapshot(agState.activeSlot)
-			else
-				syncPartWatchersToActiveSlot()
-			end
-			Engine.logEvent("LIVE GUARD ENGAGED (Slot " .. agState.activeSlot .. " | " .. getFilterMode() .. ")", "INFO")
-		else
-			clearPartWatchers()
-			table.clear(Runtime.pendingRemove)
-			table.clear(Runtime.pendingDeleted)
-			table.clear(Runtime.pendingTampered)
-			table.clear(Runtime.pendingCharUndo)
-			Engine.logEvent("Live Guard disengaged", "WARN")
+		local function watchBackpackForLock(c)
+			if not c then return end
+			table.insert(Runtime.charWatchConns, c.ChildAdded:Connect(function(child)
+				if not agAlive then return end
+				if child:FindFirstChild("SyncAPI") or child:FindFirstChild("SyncApi") then
+					Runtime.cachedEndpoint = nil
+					Runtime.cachedTool = nil
+					if agState.autoLockSelf then
+						task.delay(0.15, function()
+							if agAlive and LocalPlayer.Character == char then
+								withF3X(false, false, function(ep)
+									Engine.lockSelfCharacterParts(ep, true)
+								end)
+							end
+						end)
+					end
+				end
+			end))
 		end
-		if UI.updateTelemetry then UI.updateTelemetry() end
-		if UI.refreshShieldToggles then UI.refreshShieldToggles() end
+		watchBackpackForLock(char)
+		watchBackpackForLock(LocalPlayer:FindFirstChild("Backpack"))
+
+		if agState.autoLockSelf then
+			task.spawn(function()
+				for _ = 1, 15 do
+					if not agAlive or LocalPlayer.Character ~= char then return end
+					local ep = getF3XEndpoint(false)
+					if ep then
+						Engine.lockSelfCharacterParts(ep, true)
+						return
+					end
+					task.wait(0.3)
+				end
+			end)
+		end
 	end
 
+	if LocalPlayer.Character then
+		watchOwnCharacter(LocalPlayer.Character)
+	end
+
+	trackConn(LocalPlayer.CharacterAdded:Connect(function(char)
+		if not agAlive then return end
+		agState.f3xRequestedThisLife = false
+		Runtime.cachedEndpoint = nil
+		Runtime.cachedTool = nil
+		markRigDeployGrace(2.5)
+		watchOwnCharacter(char)
+
+		local hrp = char:WaitForChild("HumanoidRootPart", 10)
+		if not hrp or not agAlive then return end
+
+		if agState.antiVoid and not getActiveSnapshot() then
+			task.wait(0.35)
+			if not agAlive then return end
+			local ep = getF3XEndpoint(true)
+			if ep and hrp.Position.Y < -20 then
+				createFallbackBaseplate(ep, hrp.Position)
+			end
+		end
+	end))
+
+	-- ========================================================================
+	-- WORKSPACE & PLAYER MONITORING
+	-- ========================================================================
 	trackConn(workspace.DescendantAdded:Connect(function(desc)
-		if not agAlive or not agState.liveGuard then return end
-		if Runtime.selfRestoringDepth > 0 or isRigDeployGraceActive() then return end
-		if isProtectedWorldSystem(desc) or Runtime.scriptManagedParts[desc] or isOwnRigPart(desc) or isOwnCoreCharacterHelper(desc) then return end
+		if not agAlive then return end
 
-		local isChar = isPlayerCharacterDescendant(desc)
-		if isChar then return end
-
-		local snap = getActiveSnapshot()
-		if snap and (snap.parts[desc] or snap.effects[desc] or snap.meshes[desc] or snap.joints[desc] or snap.containers[desc]) then
+		if isRigDeployGraceActive() then
+			if not isProtectedWorldSystem(desc) and not isPlayerCharacterDescendant(desc) then
+				Runtime.protectedRigInstances[desc] = true
+			end
 			return
 		end
 
-		if desc:IsA("BasePart") then
-			table.insert(Runtime.recentForeignBuffer, { t = os.clock(), inst = desc })
-			local burstCount, burstEntries = getFloodBurstAndPrune()
-			if burstCount >= AG_CONFIG.FloodRateThreshold then
-				for _, entry in ipairs(burstEntries) do
-					if entry.inst and entry.inst.Parent ~= nil and not isOwnRigPart(entry.inst) then
-						quarantineInstanceLocally(entry.inst)
-						Runtime.pendingRemove[entry.inst] = true
-					end
-				end
-			end
+		if Runtime.selfRestoringDepth > 0 or Runtime.scriptManagedParts[desc] or isOwnRigPart(desc) or isOwnCoreCharacterHelper(desc) then return end
+		if isProtectedWorldSystem(desc) then return end
 
-			local mode = getFilterMode()
-			if mode == "Strict Lockdown" then
-				quarantineInstanceLocally(desc)
-				Runtime.pendingRemove[desc] = true
-				attributeThreat(desc.Position, 1, "STRICT_SPAWN")
-			elseif mode == "Smart Threats" then
-				local bad, reason = isSuspiciousPart(desc, false)
-				if bad then
-					quarantineInstanceLocally(desc)
-					Runtime.pendingRemove[desc] = true
-					attributeThreat(desc.Position, 2, reason)
+		local isForeignPart = desc:IsA("BasePart")
+		local snap = getActiveSnapshot()
+		if isForeignPart and not isPlayerCharacterDescendant(desc) and (not snap or not snap.parts[desc]) then
+			table.insert(Runtime.recentForeignBuffer, { t = os.clock(), part = desc })
+			local rate, burst = getFloodBurstAndPrune()
+			if agState.autoClean and getFilterMode() ~= "Effects Only" and rate >= AG_CONFIG.FloodRateThreshold then
+				if not isWhitelistedPlayerNearby(desc.Position, 32) then
+					for _, bEntry in ipairs(burst) do
+						local bp = bEntry.part
+						if bp and bp.Parent ~= nil and not Runtime.pendingRemove[bp] and (not snap or not snap.parts[bp]) and not isOwnRigPart(bp) then
+							if not isWhitelistedPlayerNearby(bp.Position, 32) then
+								quarantineInstanceLocally(bp)
+								Runtime.pendingRemove[bp] = true
+							end
+						end
+					end
+					attributeThreat(desc.Position, 3, "Part Flood")
 				end
 			end
-		elseif isSpamEffect(desc) then
+		end
+
+		if not agState.autoClean then return end
+
+		if isSpamEffect(desc) then
 			quarantineInstanceLocally(desc)
 			Runtime.pendingRemove[desc] = true
-			local anchorPart = desc:FindFirstAncestorWhichIsA("BasePart")
-			attributeThreat(anchorPart and anchorPart.Position, 1, "FX_SPAM")
+			local pPart = desc:IsA("BasePart") and desc or desc:FindFirstAncestorWhichIsA("BasePart")
+			attributeThreat(pPart and pPart.Position, 1, desc.ClassName)
+		elseif getFilterMode() ~= "Effects Only" and isForeignPart then
+			local bad, reason = isSuspiciousPart(desc, getFilterMode() == "Strict Lockdown")
+			if bad then
+				quarantineInstanceLocally(desc)
+				Runtime.pendingRemove[desc] = true
+				attributeThreat(desc.Position, (reason == "Seat Trap" or reason == "Oversized Block") and 4 or 2, reason)
+			end
 		end
 	end))
 
 	trackConn(workspace.DescendantRemoving:Connect(function(desc)
-		if not agAlive or not agState.liveGuard then return end
-		if Runtime.selfRestoringDepth > 0 or isRigDeployGraceActive() then return end
+		if not agAlive or not agState.liveGuard or Runtime.selfRestoringDepth > 0 or isRigDeployGraceActive() then return end
 		if isOwnRigPart(desc) or isOwnCoreCharacterHelper(desc) then return end
-
 		local snap = getActiveSnapshot()
 		if not snap then return end
-		if snap.parts[desc] or snap.meshes[desc] or snap.joints[desc] or snap.containers[desc] then
+		if snap.parts[desc] then
 			Runtime.pendingDeleted[desc] = true
-			if desc:IsA("BasePart") and snap.parts[desc] then
-				attributeThreat(snap.parts[desc].CFrame.Position, 3, "MAP_DELETE")
+			attributeThreat(desc.Position, 2, "Map Deletion")
+		elseif (snap.containers and snap.containers[desc]) or (snap.joints and snap.joints[desc]) or (snap.effects and snap.effects[desc]) or (snap.meshes and snap.meshes[desc]) then
+			for part in pairs(snap.parts) do
+				if part and (part == desc or part:IsDescendantOf(desc) or not part:IsDescendantOf(workspace)) then
+					Runtime.pendingDeleted[part] = true
+				end
 			end
+			attributeThreat(nil, 4, "Container/Joint Delete")
 		end
 	end))
 
-	-- Live Guard worker coroutine
-	task.spawn(function()
-		while agAlive do
-			task.wait(AG_CONFIG.WorkerInterval)
-			if agState.liveGuard and not Runtime.restoreInFlight then
-				local endpoint = getF3XEndpoint(false)
-
-				if agState.autoClean and next(Runtime.pendingRemove) ~= nil then
-					local removeList = {}
-					for inst in pairs(Runtime.pendingRemove) do
-						Runtime.pendingRemove[inst] = nil
-						if inst and inst.Parent ~= nil and not isProtectedWorldSystem(inst) and not isOwnRigPart(inst) and not isOwnCoreCharacterHelper(inst) then
-							table.insert(removeList, inst)
-						end
-					end
-					if #removeList > 0 then
-						if endpoint then
-							local removed = batchRemove(endpoint, removeList)
-							agState.threatsBlocked += removed
-							if removed > 0 and UI.updateTelemetry then UI.updateTelemetry() end
-						else
-							for _, inst in ipairs(removeList) do
-								quarantineInstanceLocally(inst)
-							end
-						end
-					end
-				else
-					table.clear(Runtime.pendingRemove)
-				end
-
-				if endpoint and (next(Runtime.pendingDeleted) ~= nil or next(Runtime.pendingTampered) ~= nil) then
-					local snap = getActiveSnapshot()
-					if snap then
-						beginSelfRestoring()
-						local deletedList = {}
-						for inst in pairs(Runtime.pendingDeleted) do
-							Runtime.pendingDeleted[inst] = nil
-							if inst and inst.Parent == nil then
-								table.insert(deletedList, inst)
-							end
-						end
-
-						if #deletedList > 0 then
-							batchInvoke(endpoint, "UndoRemove", deletedList, AG_CONFIG.BatchSize)
-							local stillMissing = {}
-							for _, inst in ipairs(deletedList) do
-								if inst:IsA("BasePart") and snap.parts[inst] and (inst.Parent == nil or not inst:IsDescendantOf(workspace)) then
-									table.insert(stillMissing, inst)
-								end
-							end
-							if #stillMissing > 0 then
-								task.spawn(function()
-									Engine.restoreMap(endpoint)
-								end)
-							else
-								agState.restoresPerformed += #deletedList
-							end
-						end
-
-						local reanchorList, moveList, resizeList, colorList, matList, colList, lockList = {}, {}, {}, {}, {}, {}, {}
-						local fixedCount = 0
-						for part in pairs(Runtime.pendingTampered) do
-							Runtime.pendingTampered[part] = nil
-							local d = snap.parts[part]
-							if d and part and part.Parent ~= nil and part:IsDescendantOf(workspace) then
-								local hits = (Runtime.tamperHits[part] or 0) + 1
-								Runtime.tamperHits[part] = hits
-								if part.Anchored ~= d.Anchored then
-									table.insert(reanchorList, { Part = part, Anchored = d.Anchored })
-								end
-								if cframeDiffers(part.CFrame, d.CFrame) then
-									table.insert(moveList, { Part = part, CFrame = d.CFrame })
-								end
-								if sizeDiffers(part.Size, d.Size) then
-									table.insert(resizeList, { Part = part, Size = d.Size, CFrame = d.CFrame })
-								end
-								if colorDiffers(part.Color, d.Color) then
-									table.insert(colorList, { Part = part, Color = d.Color, UnionColoring = true })
-								end
-								if part.Material ~= d.Material or math.abs(part.Transparency - d.Transparency) > 0.01 or math.abs(part.Reflectance - d.Reflectance) > 0.01 then
-									table.insert(matList, { Part = part, Material = d.Material, Transparency = d.Transparency, Reflectance = d.Reflectance })
-								end
-								if part.CanCollide ~= d.CanCollide then
-									table.insert(colList, { Part = part, CanCollide = d.CanCollide })
-								end
-								if (d.Locked or agState.autoLockAfterRestore) and not part.Locked then
-									table.insert(lockList, part)
-									d.Locked = true
-								end
-								fixedCount += 1
-							end
-						end
-
-						if fixedCount > 0 then
-							if #reanchorList > 0 then batchInvoke(endpoint, "SyncAnchor", reanchorList) end
-							runParallel(5, 5, function(stepIdx)
-								if stepIdx == 1 and #moveList > 0 then batchInvoke(endpoint, "SyncMove", moveList)
-								elseif stepIdx == 2 and #resizeList > 0 then batchInvoke(endpoint, "SyncResize", resizeList)
-								elseif stepIdx == 3 and #colorList > 0 then batchInvoke(endpoint, "SyncColor", colorList)
-								elseif stepIdx == 4 and #matList > 0 then batchInvoke(endpoint, "SyncMaterial", matList)
-								elseif stepIdx == 5 and #colList > 0 then batchInvoke(endpoint, "SyncCollision", colList) end
-							end)
-							if #lockList > 0 then
-								batchLockParts(endpoint, lockList, true)
-							end
-							agState.restoresPerformed += fixedCount
-							if UI.updateTelemetry then UI.updateTelemetry() end
-						end
-						endSelfRestoring()
-					end
-				end
-			end
+	local function hookPlayerTools(plr)
+		if plr.Character then
+			registerCharacter(plr, plr.Character)
 		end
-	end)
 
-	-- Tamper cyclic sweep (catches any property drifts on unlocked/watched parts)
+		local function watchContainer(c)
+			if not c then return end
+			trackConn(c.ChildAdded:Connect(function(child)
+				if not agAlive then return end
+				if child:FindFirstChild("SyncAPI") or child:FindFirstChild("SyncApi") then
+					if plr ~= LocalPlayer then
+						Engine.logEvent(plr.Name .. " equipped/received F3X", "WARN")
+					else
+						Runtime.cachedEndpoint = nil
+						Runtime.cachedTool = nil
+					end
+					if UI.refreshRadar and agState.windowOpen then task.defer(UI.refreshRadar) end
+				end
+			end))
+		end
+
+		watchContainer(plr:FindFirstChild("Backpack"))
+		if plr.Character then watchContainer(plr.Character) end
+
+		trackConn(plr.ChildAdded:Connect(function(child)
+			if not agAlive then return end
+			if child:IsA("Backpack") or child.Name == "Backpack" then
+				watchContainer(child)
+			end
+		end))
+
+		trackConn(plr.CharacterAdded:Connect(function(char)
+			if not agAlive then return end
+			registerCharacter(plr, char)
+			watchContainer(char)
+			if UI.refreshRadar and agState.windowOpen then task.defer(UI.refreshRadar) end
+		end))
+
+		trackConn(plr.CharacterRemoving:Connect(function()
+			registerCharacter(plr, nil)
+		end))
+	end
+
+	for _, p in ipairs(Players:GetPlayers()) do
+		hookPlayerTools(p)
+	end
+	trackConn(Players.PlayerAdded:Connect(function(p)
+		if not agAlive then return end
+		hookPlayerTools(p)
+		if UI.refreshRadar and agState.windowOpen then task.defer(UI.refreshRadar) end
+	end))
+	trackConn(Players.PlayerRemoving:Connect(function(p)
+		registerCharacter(p, nil)
+		Runtime.cagedPartsByUserId[p.UserId] = nil
+		agState.threatScores[p.UserId] = nil
+		agState.lastCounterTime[p.UserId] = nil
+		if UI.refreshRadar and agState.windowOpen then task.defer(UI.refreshRadar) end
+	end))
+
+	-- Tamper cyclic sweep
 	task.spawn(function()
 		while agAlive do
-			task.wait(AG_CONFIG.TamperInterval)
-			if agState.liveGuard and not Runtime.restoreInFlight and Runtime.selfRestoringDepth == 0 and not isRigDeployGraceActive() then
+			if agState.liveGuard and not agState.isBusy and not Runtime.restoreInFlight and Runtime.selfRestoringDepth == 0 and not isRigDeployGraceActive() then
 				local snap = getActiveSnapshot()
 				if snap and #snap.partList > 0 then
-					local total = #snap.partList
-					local startIdx = agState.scanCursor
-					local endIdx = math.min(total, startIdx + AG_CONFIG.TamperSliceSize - 1)
-					for i = startIdx, endIdx do
-						local part = snap.partList[i]
-						local data = part and snap.parts[part]
-						if part and data then
-							if part.Parent == nil or not part:IsDescendantOf(workspace) then
-								Runtime.pendingDeleted[part] = true
-							else
-								if cframeDiffers(part.CFrame, data.CFrame)
+					local list = snap.partList
+					local total = #list
+					local checked = 0
+					while checked < AG_CONFIG.TamperSliceSize and checked < total do
+						if agState.scanCursor > total then
+							agState.scanCursor = 1
+						end
+						local part = list[agState.scanCursor]
+						agState.scanCursor += 1
+						checked += 1
+
+						if part then
+							local data = snap.parts[part]
+							if data then
+								if part.Parent == nil or not part:IsDescendantOf(workspace) then
+									Runtime.pendingDeleted[part] = true
+								elseif cframeDiffers(part.CFrame, data.CFrame)
 									or sizeDiffers(part.Size, data.Size)
-									or part.Anchored ~= data.Anchored
-									or part.CanCollide ~= data.CanCollide
 									or colorDiffers(part.Color, data.Color)
 									or part.Material ~= data.Material
 									or math.abs(part.Transparency - data.Transparency) > 0.01
+									or math.abs(part.Reflectance - data.Reflectance) > 0.01
+									or part.Anchored ~= data.Anchored
+									or part.CanCollide ~= data.CanCollide
 									or (not part.Locked and (data.Locked or agState.autoLockAfterRestore)) then
 									Runtime.pendingTampered[part] = true
 								end
 							end
 						end
 					end
-					agState.scanCursor = (endIdx >= total) and 1 or (endIdx + 1)
 				end
 			end
+			task.wait(AG_CONFIG.TamperInterval)
 		end
 	end)
 
-	-- Anti-Fling & Anti-Void Heartbeat
+	-- Live Guard worker coroutine
+	task.spawn(function()
+		while agAlive do
+			if not agState.isBusy and not Runtime.restoreInFlight then
+				local hasCharUndo = agState.charShield and next(Runtime.pendingCharUndo) ~= nil
+				local hasRemove = (agState.autoClean or agState.charShield) and next(Runtime.pendingRemove) ~= nil
+				local hasGuardWork = agState.liveGuard and (next(Runtime.pendingDeleted) ~= nil or next(Runtime.pendingTampered) ~= nil)
+
+				if not agState.autoClean and not agState.charShield and next(Runtime.pendingRemove) ~= nil then
+					table.clear(Runtime.pendingRemove)
+				end
+
+				if hasCharUndo or hasRemove or hasGuardWork then
+					withF3X(false, true, function(ep)
+						if hasCharUndo then
+							local undoList = {}
+							for inst in pairs(Runtime.pendingCharUndo) do
+								Runtime.pendingCharUndo[inst] = nil
+								if typeof(inst) == "Instance" then
+									table.insert(undoList, inst)
+								end
+							end
+							if #undoList > 0 then
+								beginSelfRestoring()
+								batchInvoke(ep, "UndoRemove", undoList, AG_CONFIG.BatchSize)
+								endSelfRestoring()
+								agState.threatsBlocked += #undoList
+								Engine.logEvent("Recovered " .. #undoList .. " char part/joint(s)", "SHIELD")
+								if UI.updateTelemetry then UI.updateTelemetry() end
+							end
+						end
+
+						if hasRemove then
+							local batch = {}
+							for inst in pairs(Runtime.pendingRemove) do
+								Runtime.pendingRemove[inst] = nil
+								if inst and inst.Parent ~= nil and not isOwnRigPart(inst) and not isOwnCoreCharacterHelper(inst) then
+									table.insert(batch, inst)
+								end
+							end
+							if #batch > 0 then
+								local removed = batchRemove(ep, batch)
+								if removed > 0 then
+									agState.threatsBlocked += removed
+									Engine.logEvent("Auto-blocked " .. removed .. " spam item(s)", "BLOCK")
+									if UI.updateTelemetry then UI.updateTelemetry() end
+								end
+							end
+						end
+
+						if hasGuardWork then
+							local snap = getActiveSnapshot()
+							if snap then
+								beginSelfRestoring()
+								local deletedList = {}
+								for p in pairs(Runtime.pendingDeleted) do
+									Runtime.pendingDeleted[p] = nil
+									if p and (p.Parent == nil or not p:IsDescendantOf(workspace)) then
+										table.insert(deletedList, p)
+									end
+								end
+
+								local needsFullRebuild = false
+								if #deletedList > 0 then
+									batchInvoke(ep, "UndoRemove", deletedList, AG_CONFIG.BatchSize)
+									for _, inst in ipairs(deletedList) do
+										if inst:IsA("BasePart") and snap.parts[inst] and (inst.Parent == nil or not inst:IsDescendantOf(workspace)) then
+											needsFullRebuild = true
+											break
+										end
+									end
+									if needsFullRebuild then
+										task.spawn(function()
+											Engine.restoreMap(ep)
+										end)
+									else
+										agState.restoresPerformed += 1
+										agState.threatsBlocked += #deletedList
+										Engine.logEvent("Guard undid " .. #deletedList .. " deletion(s)", "RESTORE")
+									end
+								end
+
+								local reanchorList, moveList, resizeList, colorList, matList, colList, lockList = {}, {}, {}, {}, {}, {}, {}
+								local fixedCount = 0
+								for part in pairs(Runtime.pendingTampered) do
+									Runtime.pendingTampered[part] = nil
+									local d = snap.parts[part]
+									if d and part and part.Parent ~= nil and part:IsDescendantOf(workspace) then
+										local hits = (Runtime.tamperHits[part] or 0) + 1
+										Runtime.tamperHits[part] = hits
+										if part.Anchored ~= d.Anchored then
+											table.insert(reanchorList, { Part = part, Anchored = d.Anchored })
+										end
+										if cframeDiffers(part.CFrame, d.CFrame) then
+											table.insert(moveList, { Part = part, CFrame = d.CFrame })
+										end
+										if sizeDiffers(part.Size, d.Size) then
+											table.insert(resizeList, { Part = part, Size = d.Size, CFrame = d.CFrame })
+										end
+										if colorDiffers(part.Color, d.Color) then
+											table.insert(colorList, { Part = part, Color = d.Color, UnionColoring = true })
+										end
+										if part.Material ~= d.Material or math.abs(part.Transparency - d.Transparency) > 0.01 or math.abs(part.Reflectance - d.Reflectance) > 0.01 then
+											table.insert(matList, { Part = part, Material = d.Material, Transparency = d.Transparency, Reflectance = d.Reflectance })
+										end
+										if part.CanCollide ~= d.CanCollide then
+											table.insert(colList, { Part = part, CanCollide = d.CanCollide })
+										end
+										if (d.Locked or agState.autoLockAfterRestore) and not part.Locked then
+											table.insert(lockList, part)
+											d.Locked = true
+										end
+										fixedCount += 1
+									end
+								end
+
+								if fixedCount > 0 then
+									if #reanchorList > 0 then batchInvoke(ep, "SyncAnchor", reanchorList) end
+									runParallel(5, 5, function(stepIdx)
+										if stepIdx == 1 and #moveList > 0 then batchInvoke(ep, "SyncMove", moveList)
+										elseif stepIdx == 2 and #resizeList > 0 then batchInvoke(ep, "SyncResize", resizeList)
+										elseif stepIdx == 3 and #colorList > 0 then batchInvoke(ep, "SyncColor", colorList)
+										elseif stepIdx == 4 and #matList > 0 then batchInvoke(ep, "SyncMaterial", matList)
+										elseif stepIdx == 5 and #colList > 0 then batchInvoke(ep, "SyncCollision", colList) end
+									end)
+									if #lockList > 0 then
+										batchLockParts(ep, lockList, true)
+									end
+									agState.restoresPerformed += 1
+									agState.threatsBlocked += fixedCount
+									Engine.logEvent("Guard reverted " .. fixedCount .. " tampered part(s)", "RESTORE")
+								end
+								endSelfRestoring()
+								if UI.updateTelemetry then UI.updateTelemetry() end
+							else
+								table.clear(Runtime.pendingDeleted)
+								table.clear(Runtime.pendingTampered)
+							end
+						end
+					end)
+				end
+			end
+			task.wait(AG_CONFIG.WorkerInterval)
+		end
+	end)
+
 	local flingOverlapParams = OverlapParams.new()
 	flingOverlapParams.FilterType = Enum.RaycastFilterType.Exclude
+
 	trackConn(RunService.Heartbeat:Connect(function()
-		if not agAlive or not agState.liveGuard then return end
+		if not agAlive then return end
 		local char = LocalPlayer.Character
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		if not hrp or not hum or hum.Health <= 0 then return end
 
-		if agState.antiVoid then
-			if hrp.Position.Y > AG_CONFIG.VoidThresholdY + 25 and hum.FloorMaterial ~= Enum.Material.Air then
-				agState.lastSafeCFrame = hrp.CFrame
-			elseif hrp.Position.Y < AG_CONFIG.VoidThresholdY then
-				hrp.AssemblyLinearVelocity = Vector3.zero
-				hrp.AssemblyAngularVelocity = Vector3.zero
-				if agState.lastSafeCFrame then
-					hrp.CFrame = agState.lastSafeCFrame + Vector3.new(0, 4, 0)
-					Engine.logEvent("Anti-Void rescued character to safe ground", "BLOCK")
-				else
-					local rescuePos = Vector3.new(hrp.Position.X, 15, hrp.Position.Z)
-					hrp.CFrame = CFrame.new(rescuePos)
-					withF3X(false, false, function(ep)
-						createFallbackBaseplate(ep, rescuePos)
-					end)
-					Engine.logEvent("Anti-Void deployed rescue platform", "BLOCK")
-				end
-			end
+		if hum.FloorMaterial ~= Enum.Material.Air and hrp.Position.Y > AG_CONFIG.VoidThresholdY + 20 and hrp.AssemblyLinearVelocity.Magnitude < 55 then
+			agState.lastSafeCFrame = hrp.CFrame
 		end
 
 		if agState.antiFling then
 			local highSpeedSelf = isCoreHighSpeedAction() or isRigDeployGraceActive()
+			local triggered = false
+			local now = os.clock()
+
 			if not highSpeedSelf then
 				local vel = hrp.AssemblyLinearVelocity
-				local ang = hrp.AssemblyAngularVelocity
-				if vel.Magnitude > AG_CONFIG.FlingVelocityThreshold or ang.Magnitude > 55 then
+				local rot = hrp.AssemblyAngularVelocity
+				triggered = (vel.Magnitude > AG_CONFIG.FlingVelocityThreshold or rot.Magnitude > 55)
+				if triggered then
 					hrp.AssemblyLinearVelocity = Vector3.zero
 					hrp.AssemblyAngularVelocity = Vector3.zero
 					if agState.lastSafeCFrame and vel.Magnitude > 260 then
-						hrp.CFrame = agState.lastSafeCFrame
+						hrp.CFrame = agState.lastSafeCFrame + Vector3.new(0, 2, 0)
 					end
 					agState.threatsBlocked += 1
 				end
 			end
 
-			local now = os.clock()
-			if now - Runtime.lastFlingSweep >= 0.12 then
+			if triggered or (now - Runtime.lastFlingSweep >= 0.12) then
 				Runtime.lastFlingSweep = now
+				local snap = getActiveSnapshot()
 				flingOverlapParams.FilterDescendantsInstances = { char }
-				local nearby = workspace:GetPartBoundsInRadius(hrp.Position, 24, flingOverlapParams)
-				for _, p in ipairs(nearby) do
-					if p:IsA("BasePart") and not p.Anchored and not isOwnRigPart(p) and not isOwnCoreCharacterHelper(p) then
-						local isChar, pOwner = isPlayerCharacterDescendant(p)
-						if isChar and pOwner ~= LocalPlayer and not agState.whitelist[pOwner.UserId] then
-							if p.AssemblyLinearVelocity.Magnitude > 85 or p.AssemblyAngularVelocity.Magnitude > 35 then
-								p.AssemblyLinearVelocity = Vector3.zero
-								p.AssemblyAngularVelocity = Vector3.zero
-								p.CanCollide = false
-								attributeThreat(p.Position, 2, "FLING_BODY")
-							end
-						elseif not isChar then
-							local snap = getActiveSnapshot()
-							if (not snap or not snap.parts[p]) and (p.AssemblyLinearVelocity.Magnitude > 65 or p.AssemblyAngularVelocity.Magnitude > 30) then
-								quarantineInstanceLocally(p)
-								Runtime.pendingRemove[p] = true
+				local okSpatial, nearby = pcall(function()
+					return workspace:GetPartBoundsInRadius(hrp.Position, 24, flingOverlapParams)
+				end)
+				if okSpatial and nearby then
+					for _, desc in ipairs(nearby) do
+						if desc:IsA("BasePart") and not desc.Anchored and not isOwnRigPart(desc) and not isOwnCoreCharacterHelper(desc) and not Runtime.scriptManagedParts[desc] then
+							local isChar, pOwner = isPlayerCharacterDescendant(desc)
+							if isChar and pOwner and pOwner ~= LocalPlayer and not agState.whitelist[pOwner.UserId] then
+								if desc.AssemblyLinearVelocity.Magnitude > 85 or desc.AssemblyAngularVelocity.Magnitude > 35 then
+									desc.AssemblyLinearVelocity = Vector3.zero
+									desc.AssemblyAngularVelocity = Vector3.zero
+									desc.CanCollide = false
+									attributeThreat(desc.Position, 2, "FLING_BODY")
+								end
+							elseif not isChar and (not snap or not snap.parts[desc]) then
+								if desc.AssemblyLinearVelocity.Magnitude > 22 or desc.AssemblyAngularVelocity.Magnitude > 15 or triggered then
+									desc.CanCollide = false
+									if agState.autoClean then
+										Runtime.pendingRemove[desc] = true
+									end
+								end
 							end
 						end
 					end
 				end
 			end
 		end
-	end))
 
-	-- Player & Character registration
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr.Character then
-			registerCharacter(plr, plr.Character)
-		end
-		trackConn(plr.CharacterAdded:Connect(function(c)
-			if not agAlive then return end
-			registerCharacter(plr, c)
-			if plr == LocalPlayer then
-				setupCharacterShield(c)
-			end
-		end))
-	end
-	if LocalPlayer.Character then
-		setupCharacterShield(LocalPlayer.Character)
-	end
-	trackConn(Players.PlayerAdded:Connect(function(plr)
-		if not agAlive then return end
-		trackConn(plr.CharacterAdded:Connect(function(c)
-			if agAlive then registerCharacter(plr, c) end
-		end))
-		if agState.windowOpen and UI.refreshRadar then
-			task.defer(UI.refreshRadar)
-		end
-	end))
-	trackConn(Players.PlayerRemoving:Connect(function(plr)
-		if not agAlive then return end
-		registerCharacter(plr, nil)
-		Runtime.cagedPartsByUserId[plr.UserId] = nil
-		if agState.windowOpen and UI.refreshRadar then
-			task.defer(UI.refreshRadar)
+		if agState.antiVoid and hrp.Position.Y < AG_CONFIG.VoidThresholdY then
+			withF3X(false, true, function(ep)
+				Engine.rescueCharacter(ep)
+			end)
 		end
 	end))
 
 	-- ========================================================================
-	-- SMILEOS 2.0 WINDOW & CHROME LAYOUT (MATCHING LOADER.LUA)
+	-- SMILEOS 2.0 CHROME ANTI-GRIEF WINDOW (MATCHES LOADER.LUA)
 	-- ========================================================================
-	local AG_FULL_W = 356
-	local AG_FULL_H = 412
+	local AG_FULL_W, AG_FULL_H = 356, 412
 	local AG_COLLAPSED_H = 30
+	local AG_FULL_SIZE = UDim2.fromOffset(AG_FULL_W, AG_FULL_H)
+	local AG_COLLAPSED_SIZE = UDim2.fromOffset(AG_FULL_W, 0)
+	local AG_MIN_SIZE = UDim2.fromOffset(AG_FULL_W, AG_COLLAPSED_H)
 
-	local function computeAGScale()
+	local function computeWindowScale()
 		local vp = getScreenSize(ScreenGui)
 		local isCompact = UserInputService.TouchEnabled or vp.X < 760 or vp.Y < 540
-		local rawScale = math.min((vp.X - 24) / (AG_FULL_W + 40), (vp.Y - 24) / AG_FULL_H)
+		local fitScale = math.min((vp.X - 24) / AG_FULL_W, (vp.Y - 24) / AG_FULL_H)
 		if isCompact then
-			return math.clamp(rawScale, 0.48, 0.80)
+			return math.clamp(fitScale, 0.48, 0.80)
 		end
-		return math.clamp(rawScale, 0.65, 1.0)
+		return math.clamp(fitScale, 0.65, 1.0)
 	end
 
+	local initScale = computeWindowScale()
+	local initVp = getScreenSize(ScreenGui)
+
 	local AGWindow = Instance.new("Frame")
-	AGWindow.Name = "AGWindow"
-	AGWindow.Size = UDim2.fromOffset(AG_FULL_W, AG_FULL_H)
-	AGWindow.Position = UDim2.fromOffset(600, 60)
+	AGWindow.Name = "AntiGriefWindow"
+	AGWindow.Size = createdOwnGui and AG_FULL_SIZE or AG_COLLAPSED_SIZE
+	AGWindow.Position = createdOwnGui
+		and UDim2.fromOffset(
+			math.max(0, math.floor((initVp.X - AG_FULL_W * initScale) * 0.5)),
+			math.max(0, math.floor((initVp.Y - AG_FULL_H * initScale) * 0.5))
+		)
+		or UDim2.fromOffset(math.max(0, math.floor(initVp.X * 0.5 + 160)), math.max(0, math.floor((initVp.Y - AG_FULL_H * initScale) * 0.5)))
 	AGWindow.BackgroundColor3 = SMILE.WinFace
 	AGWindow.BorderSizePixel = 0
+	AGWindow.Active = true
+	AGWindow.Visible = createdOwnGui
 	AGWindow.ClipsDescendants = true
-	AGWindow.Visible = false
-	AGWindow.ZIndex = 40
+	AGWindow.ZIndex = 2
 	AGWindow.Parent = ScreenGui
-	addOutline(AGWindow, SMILE.BorderOuter, 1)
-	local agWindowBevel = createBevel(AGWindow, false, 2)
 
 	local AGScale = Instance.new("UIScale")
-	AGScale.Scale = computeAGScale()
+	AGScale.Scale = initScale
 	AGScale.Parent = AGWindow
 
+	createBevel(AGWindow, false, 2)
+	addOutline(AGWindow, SMILE.BorderOuter, 1)
+
 	trackConn(ScreenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-		if not agAlive then return end
-		AGScale.Scale = computeAGScale()
-		if AGWindow.Visible then
-			clampWindowToScreen(AGWindow, ScreenGui)
-		end
+		if not agAlive or not AGScale or not AGScale.Parent then return end
+		AGScale.Scale = computeWindowScale()
+		task.defer(function()
+			if agAlive and AGWindow and AGWindow.Parent and AGWindow.Visible then
+				clampWindowToScreen(AGWindow, ScreenGui)
+			end
+		end)
 	end))
 
-	-- 26px Crimson TitleBar
+	-- Title Bar (XP-style SmileOS 2.0 Crimson Gradient + Pixel Smiley)
 	local AGTitleBar = Instance.new("Frame")
-	AGTitleBar.Name = "AGTitleBar"
-	AGTitleBar.Size = UDim2.new(1, -6, 0, 26)
-	AGTitleBar.Position = UDim2.fromOffset(3, 3)
+	AGTitleBar.Name = "TitleBar"
+	AGTitleBar.Size = UDim2.new(1, -4, 0, 26)
+	AGTitleBar.Position = UDim2.fromOffset(2, 2)
 	AGTitleBar.BackgroundColor3 = SMILE.HeaderTop
 	AGTitleBar.BorderSizePixel = 0
-	AGTitleBar.ZIndex = AGWindow.ZIndex + 2
+	AGTitleBar.Active = true
+	AGTitleBar.ZIndex = 3
 	AGTitleBar.Parent = AGWindow
 
-	local agTitleGrad = Instance.new("UIGradient")
-	agTitleGrad.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, SMILE.HeaderTop),
+	local titleGrad = Instance.new("UIGradient")
+	titleGrad.Rotation = 90
+	titleGrad.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(224, 58, 58)),
+		ColorSequenceKeypoint.new(0.18, SMILE.HeaderTop),
 		ColorSequenceKeypoint.new(1, SMILE.HeaderBot),
 	})
-	agTitleGrad.Rotation = 90
-	agTitleGrad.Parent = AGTitleBar
+	titleGrad.Parent = AGTitleBar
 
 	createSmileyIcon(AGTitleBar, 18, UDim2.fromOffset(5, 4), SMILE.InsetLight, SMILE.TextDark)
 
-	local AGTitleLabel = Instance.new("TextLabel")
-	AGTitleLabel.Size = UDim2.new(1, -82, 1, 0)
-	AGTitleLabel.Position = UDim2.fromOffset(29, 0)
-	AGTitleLabel.BackgroundTransparency = 1
-	AGTitleLabel.Font = Enum.Font.GothamBlack
-	AGTitleLabel.TextSize = 12
-	AGTitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-	AGTitleLabel.TextColor3 = SMILE.TextLight
-	AGTitleLabel.TextStrokeTransparency = 0.72
-	AGTitleLabel.TextStrokeColor3 = SMILE.BorderOuter
-	AGTitleLabel.Text = "SENTINEL ULTRA // ANTI-GRIEF"
-	AGTitleLabel.ZIndex = AGTitleBar.ZIndex + 1
-	AGTitleLabel.Parent = AGTitleBar
+	local AGTitleText = Instance.new("TextLabel")
+	AGTitleText.Size = UDim2.new(1, -92, 1, 0)
+	AGTitleText.Position = UDim2.fromOffset(28, 0)
+	AGTitleText.BackgroundTransparency = 1
+	AGTitleText.Font = Enum.Font.GothamBold
+	AGTitleText.TextSize = 12
+	AGTitleText.TextColor3 = SMILE.TextLight
+	AGTitleText.TextStrokeTransparency = 0.65
+	AGTitleText.TextStrokeColor3 = Color3.new(0, 0, 0)
+	AGTitleText.TextXAlignment = Enum.TextXAlignment.Left
+	AGTitleText.TextTruncate = Enum.TextTruncate.AtEnd
+	AGTitleText.Text = "SmileOS 2.0  -  ANTI-GRIEF.SYS"
+	AGTitleText.ZIndex = 4
+	AGTitleText.Parent = AGTitleBar
 
-	local function makeCaptionBtn(text, xOffset)
+	local function makeCaptionButton(text, posOffset, isClose)
 		local btn = Instance.new("TextButton")
-		btn.Size = UDim2.fromOffset(20, 18)
-		btn.Position = UDim2.new(1, xOffset, 0, 4)
-		btn.BackgroundColor3 = SMILE.BtnFace
+		btn.Size = UDim2.fromOffset(24, 20)
+		btn.Position = UDim2.new(1, posOffset, 0, 3)
+		btn.BackgroundColor3 = isClose and Color3.fromRGB(215, 60, 56) or SMILE.BtnFace
 		btn.BorderSizePixel = 0
-		btn.Font = Enum.Font.GothamBlack
-		btn.TextSize = 11
-		btn.TextColor3 = SMILE.TextDark
+		btn.Font = Enum.Font.GothamBold
+		btn.TextSize = 12
+		btn.TextColor3 = isClose and SMILE.TextLight or SMILE.TextDark
 		btn.Text = text
 		btn.AutoButtonColor = false
-		btn.ZIndex = AGTitleBar.ZIndex + 3
+		btn.ZIndex = 4
 		btn.Parent = AGTitleBar
+		local bev = createBevel(btn, false, 1)
 		addOutline(btn, SMILE.BorderOuter, 1)
-		local bv = createBevel(btn, false, 1)
 
-		trackConn(btn.MouseEnter:Connect(function()
-			btn.BackgroundColor3 = SMILE.BtnHover
-		end))
-		trackConn(btn.MouseLeave:Connect(function()
-			btn.BackgroundColor3 = SMILE.BtnFace
-			bv.setPressed(false)
-		end))
-		trackConn(btn.MouseButton1Down:Connect(function()
-			bv.setPressed(true)
-		end))
-		trackConn(btn.MouseButton1Up:Connect(function()
-			bv.setPressed(false)
-		end))
+		btn.MouseButton1Down:Connect(function()
+			bev.setPressed(true)
+		end)
+		btn.MouseButton1Up:Connect(function()
+			bev.setPressed(false)
+		end)
+		btn.MouseLeave:Connect(function()
+			bev.setPressed(false)
+		end)
 		return btn
 	end
 
-	local AGMinBtn = makeCaptionBtn("_", -45)
-	local AGCloseBtn = makeCaptionBtn("X", -23)
+	local AGMinBtn = makeCaptionButton("_", -54, false)
+	local AGCloseBtn = makeCaptionButton("X", -27, true)
+
 	makeDraggable(AGTitleBar, AGWindow)
 
-	-- Inner Container
+	-- Body Container
 	local AGBody = Instance.new("Frame")
-	AGBody.Name = "AGBody"
-	AGBody.Size = UDim2.new(1, -12, 1, -60)
-	AGBody.Position = UDim2.fromOffset(6, 32)
+	AGBody.Name = "Body"
+	AGBody.Size = UDim2.new(1, -8, 1, -60)
+	AGBody.Position = UDim2.fromOffset(4, 30)
 	AGBody.BackgroundTransparency = 1
-	AGBody.ZIndex = AGWindow.ZIndex + 1
+	AGBody.ZIndex = 2
 	AGBody.Parent = AGWindow
 
-	-- CRT Telemetry Well
+	-- Recessed CRT Telemetry Header Well
 	local AGTelemetryBox = Instance.new("Frame")
-	AGTelemetryBox.Size = UDim2.new(1, 0, 0, 26)
+	AGTelemetryBox.Size = UDim2.new(1, -8, 0, 22)
+	AGTelemetryBox.Position = UDim2.fromOffset(4, 4)
 	AGTelemetryBox.BackgroundColor3 = SMILE.InsetDark
 	AGTelemetryBox.BorderSizePixel = 0
-	AGTelemetryBox.ZIndex = AGBody.ZIndex + 1
+	AGTelemetryBox.ZIndex = 3
 	AGTelemetryBox.Parent = AGBody
-	addOutline(AGTelemetryBox, SMILE.BevelDark, 1)
-	createBevel(AGTelemetryBox, true, 1)
+	createBevel(AGTelemetryBox, true, 2)
 
 	local AGTelemetry = Instance.new("TextLabel")
-	AGTelemetry.Size = UDim2.new(1, -14, 1, 0)
-	AGTelemetry.Position = UDim2.fromOffset(7, 0)
+	AGTelemetry.Size = UDim2.new(1, -10, 1, 0)
+	AGTelemetry.Position = UDim2.fromOffset(6, 0)
 	AGTelemetry.BackgroundTransparency = 1
 	AGTelemetry.Font = Enum.Font.Code
 	AGTelemetry.TextSize = 11
+	AGTelemetry.TextColor3 = SMILE.AccentGold
 	AGTelemetry.TextXAlignment = Enum.TextXAlignment.Left
-	AGTelemetry.TextColor3 = SMILE.TextMutedLight
-	AGTelemetry.Text = "GUARD: OFF | SLOT 1: NONE | BLK: 0 | FIX: 0"
-	AGTelemetry.ZIndex = AGTelemetryBox.ZIndex + 2
+	AGTelemetry.TextTruncate = Enum.TextTruncate.AtEnd
+	AGTelemetry.Text = "S1: EMPTY | BLK:0 | SMART"
+	AGTelemetry.ZIndex = 4
 	AGTelemetry.Parent = AGTelemetryBox
 
-	-- Tab Bar
+	-- Beveled OS Tab Strip
 	local AGTabBar = Instance.new("Frame")
-	AGTabBar.Size = UDim2.new(1, 0, 0, 26)
-	AGTabBar.Position = UDim2.fromOffset(0, 30)
+	AGTabBar.Size = UDim2.new(1, -8, 0, 26)
+	AGTabBar.Position = UDim2.fromOffset(4, 30)
 	AGTabBar.BackgroundTransparency = 1
-	AGTabBar.ZIndex = AGBody.ZIndex + 1
+	AGTabBar.ZIndex = 3
 	AGTabBar.Parent = AGBody
 
-	local agTabLayout = Instance.new("UIListLayout")
-	agTabLayout.FillDirection = Enum.FillDirection.Horizontal
-	agTabLayout.Padding = UDim.new(0, 4)
-	agTabLayout.Parent = AGTabBar
+	local AGTabLayout = Instance.new("UIListLayout")
+	AGTabLayout.FillDirection = Enum.FillDirection.Horizontal
+	AGTabLayout.Padding = UDim.new(0, 4)
+	AGTabLayout.Parent = AGTabBar
 
-	-- Dark CRT Pages Well
+	-- Recessed CRT Pages Well (Matches LogBox / InfoWindow)
 	local AGPagesHolder = Instance.new("Frame")
-	AGPagesHolder.Size = UDim2.new(1, 0, 1, -58)
-	AGPagesHolder.Position = UDim2.fromOffset(0, 58)
+	AGPagesHolder.Size = UDim2.new(1, -8, 1, -64)
+	AGPagesHolder.Position = UDim2.fromOffset(4, 60)
 	AGPagesHolder.BackgroundColor3 = SMILE.InsetDark
 	AGPagesHolder.BorderSizePixel = 0
-	AGPagesHolder.ZIndex = AGBody.ZIndex + 1
+	AGPagesHolder.ZIndex = 3
 	AGPagesHolder.Parent = AGBody
-	addOutline(AGPagesHolder, SMILE.BevelDark, 1)
-	createBevel(AGPagesHolder, true, 1)
+	createBevel(AGPagesHolder, true, 2)
 
-	-- 26px Bottom Taskbar
+	-- Bottom SmileOS 2.0 Taskbar
 	local AGTaskbar = Instance.new("Frame")
-	AGTaskbar.Name = "AGTaskbar"
-	AGTaskbar.Size = UDim2.new(1, -6, 0, 24)
-	AGTaskbar.Position = UDim2.new(0, 3, 1, -27)
+	AGTaskbar.Name = "Taskbar"
+	AGTaskbar.Size = UDim2.new(1, -4, 0, 26)
+	AGTaskbar.Position = UDim2.new(0, 2, 1, -28)
 	AGTaskbar.BackgroundColor3 = SMILE.TaskbarBg
 	AGTaskbar.BorderSizePixel = 0
-	AGTaskbar.ZIndex = AGWindow.ZIndex + 2
+	AGTaskbar.ZIndex = 5
 	AGTaskbar.Parent = AGWindow
 	createBevel(AGTaskbar, false, 1)
 
-	local AGStartChip = Instance.new("Frame")
-	AGStartChip.Size = UDim2.fromOffset(92, 18)
-	AGStartChip.Position = UDim2.fromOffset(4, 3)
-	AGStartChip.BackgroundColor3 = SMILE.BtnFace
-	AGStartChip.BorderSizePixel = 0
-	AGStartChip.ZIndex = AGTaskbar.ZIndex + 1
-	AGStartChip.Parent = AGTaskbar
-	addOutline(AGStartChip, SMILE.BorderOuter, 1)
-	createBevel(AGStartChip, false, 1)
+	local TaskSysPill = Instance.new("Frame")
+	TaskSysPill.Size = UDim2.fromOffset(88, 20)
+	TaskSysPill.Position = UDim2.fromOffset(3, 3)
+	TaskSysPill.BackgroundColor3 = SMILE.WinFaceAlt
+	TaskSysPill.BorderSizePixel = 0
+	TaskSysPill.ZIndex = 6
+	TaskSysPill.Parent = AGTaskbar
+	createBevel(TaskSysPill, true, 1)
 
-	local AGStartChipTxt = Instance.new("TextLabel")
-	AGStartChipTxt.Size = UDim2.fromScale(1, 1)
-	AGStartChipTxt.BackgroundTransparency = 1
-	AGStartChipTxt.Font = Enum.Font.GothamBlack
-	AGStartChipTxt.TextSize = 9
-	AGStartChipTxt.TextColor3 = SMILE.TextDark
-	AGStartChipTxt.Text = "SENTINEL.SYS"
-	AGStartChipTxt.ZIndex = AGStartChip.ZIndex + 2
-	AGStartChipTxt.Parent = AGStartChip
-
-	local AGStatusTray = Instance.new("Frame")
-	AGStatusTray.Size = UDim2.new(1, -170, 0, 18)
-	AGStatusTray.Position = UDim2.fromOffset(100, 3)
-	AGStatusTray.BackgroundColor3 = SMILE.WinFaceAlt
-	AGStatusTray.BorderSizePixel = 0
-	AGStatusTray.ZIndex = AGTaskbar.ZIndex + 1
-	AGStatusTray.Parent = AGTaskbar
-	createBevel(AGStatusTray, true, 1)
+	local TaskSysLabel = Instance.new("TextLabel")
+	TaskSysLabel.Size = UDim2.new(1, -8, 1, 0)
+	TaskSysLabel.Position = UDim2.fromOffset(4, 0)
+	TaskSysLabel.BackgroundTransparency = 1
+	TaskSysLabel.Font = Enum.Font.Code
+	TaskSysLabel.TextSize = 10
+	TaskSysLabel.TextColor3 = SMILE.TextDark
+	TaskSysLabel.Text = "SENTINEL.SYS"
+	TaskSysLabel.ZIndex = 7
+	TaskSysLabel.Parent = TaskSysPill
 
 	local AGStatus = Instance.new("TextLabel")
-	AGStatus.Size = UDim2.new(1, -10, 1, 0)
-	AGStatus.Position = UDim2.fromOffset(5, 0)
+	AGStatus.Size = UDim2.new(1, -162, 0, 20)
+	AGStatus.Position = UDim2.fromOffset(96, 3)
 	AGStatus.BackgroundTransparency = 1
 	AGStatus.Font = Enum.Font.Code
 	AGStatus.TextSize = 10
+	AGStatus.TextColor3 = SMILE.TextMutedDark
 	AGStatus.TextXAlignment = Enum.TextXAlignment.Left
-	AGStatus.TextColor3 = SMILE.TextDark
 	AGStatus.TextTruncate = Enum.TextTruncate.AtEnd
-	AGStatus.Text = "STANDBY"
-	AGStatus.ZIndex = AGStatusTray.ZIndex + 2
-	AGStatus.Parent = AGStatusTray
+	AGStatus.Text = "STATUS: STANDBY"
+	AGStatus.ZIndex = 6
+	AGStatus.Parent = AGTaskbar
 
-	local AGF3XTray = Instance.new("Frame")
-	AGF3XTray.Size = UDim2.fromOffset(64, 18)
-	AGF3XTray.Position = UDim2.new(1, -67, 0, 3)
-	AGF3XTray.BackgroundColor3 = SMILE.InsetDark
-	AGF3XTray.BorderSizePixel = 0
-	AGF3XTray.ZIndex = AGTaskbar.ZIndex + 1
-	AGF3XTray.Parent = AGTaskbar
-	createBevel(AGF3XTray, true, 1)
+	local F3XTray = Instance.new("Frame")
+	F3XTray.Size = UDim2.fromOffset(58, 20)
+	F3XTray.Position = UDim2.new(1, -61, 0, 3)
+	F3XTray.BackgroundColor3 = SMILE.InsetDark
+	F3XTray.BorderSizePixel = 0
+	F3XTray.ZIndex = 6
+	F3XTray.Parent = AGTaskbar
+	createBevel(F3XTray, true, 1)
 
 	local AGF3XBadge = Instance.new("TextLabel")
 	AGF3XBadge.Size = UDim2.fromScale(1, 1)
@@ -2480,679 +2687,944 @@ return function(ctx)
 	AGF3XBadge.TextSize = 10
 	AGF3XBadge.TextColor3 = SMILE.AccentRed
 	AGF3XBadge.Text = "NO F3X"
-	AGF3XBadge.ZIndex = AGF3XTray.ZIndex + 2
-	AGF3XBadge.Parent = AGF3XTray
+	AGF3XBadge.ZIndex = 7
+	AGF3XBadge.Parent = F3XTray
 
-	-- Tab Pages & SmileOS Button Helpers
-	local tabPages = {}
-	local tabButtons = {}
+	local agPages = {}
+	local agTabBtns = {}
 
-	local function createTabButton(id, label)
+	local function selectAGTab(name)
+		for k, p in pairs(agPages) do
+			local active = (k == name)
+			p.Visible = active
+			local tb = agTabBtns[k]
+			tb.bevel.setPressed(active)
+			tb.btn.BackgroundColor3 = active and SMILE.BtnPressedRed or SMILE.BtnFace
+			tb.lbl.TextColor3 = active and SMILE.TextLight or SMILE.TextDark
+		end
+	end
+
+	local function createAGTab(name, order)
 		local btn = Instance.new("TextButton")
 		btn.Size = UDim2.new(0.25, -3, 1, 0)
 		btn.BackgroundColor3 = SMILE.BtnFace
 		btn.BorderSizePixel = 0
-		btn.Font = Enum.Font.GothamBlack
-		btn.TextSize = 11
-		btn.TextColor3 = SMILE.TextDark
-		btn.Text = label
+		btn.Text = ""
 		btn.AutoButtonColor = false
-		btn.ZIndex = AGTabBar.ZIndex + 1
+		btn.LayoutOrder = order
+		btn.ZIndex = 4
 		btn.Parent = AGTabBar
-		addOutline(btn, SMILE.BorderOuter, 1)
-		local bv = createBevel(btn, false, 1)
+		local bev = createBevel(btn, false, 2)
+		addOutline(btn, SMILE.BevelMid, 1)
+
+		local lbl = Instance.new("TextLabel")
+		lbl.Size = UDim2.fromScale(1, 1)
+		lbl.BackgroundTransparency = 1
+		lbl.Font = Enum.Font.GothamBold
+		lbl.TextSize = 11
+		lbl.TextColor3 = SMILE.TextDark
+		lbl.Text = name
+		lbl.ZIndex = 6
+		lbl.Parent = btn
 
 		local page = Instance.new("ScrollingFrame")
-		page.Name = "Page_" .. id
-		page.Size = UDim2.new(1, -12, 1, -12)
-		page.Position = UDim2.fromOffset(6, 6)
+		page.Size = UDim2.new(1, -10, 1, -10)
+		page.Position = UDim2.fromOffset(5, 5)
 		page.BackgroundTransparency = 1
 		page.BorderSizePixel = 0
 		page.ScrollBarThickness = 4
-		page.ScrollBarImageColor3 = SMILE.AccentRed
-		page.CanvasSize = UDim2.fromOffset(0, 0)
+		page.ScrollBarImageColor3 = SMILE.WinFace
+		page.CanvasSize = UDim2.new(0, 0, 0, 0)
 		page.AutomaticCanvasSize = Enum.AutomaticSize.Y
 		page.Visible = false
-		page.ZIndex = AGPagesHolder.ZIndex + 2
+		page.ZIndex = 4
 		page.Parent = AGPagesHolder
 
-		local layout = Instance.new("UIListLayout")
-		layout.Padding = UDim.new(0, 6)
-		layout.SortOrder = Enum.SortOrder.LayoutOrder
-		layout.Parent = page
+		local pad = Instance.new("UIPadding")
+		pad.PaddingTop = UDim.new(0, 3)
+		pad.PaddingBottom = UDim.new(0, 6)
+		pad.PaddingRight = UDim.new(0, 4)
+		pad.Parent = page
 
-		tabButtons[id] = { btn = btn, bv = bv }
-		tabPages[id] = page
+		local lay = Instance.new("UIListLayout")
+		lay.Padding = UDim.new(0, 5)
+		lay.SortOrder = Enum.SortOrder.LayoutOrder
+		lay.Parent = page
 
-		trackConn(btn.MouseButton1Click:Connect(function()
-			UI.setTab(id)
-		end))
+		agPages[name] = page
+		agTabBtns[name] = { btn = btn, lbl = lbl, bevel = bev }
+
+		btn.MouseEnter:Connect(function()
+			if not page.Visible then
+				TweenService:Create(btn, TweenInfo.new(0.1), { BackgroundColor3 = SMILE.BtnHover }):Play()
+			end
+		end)
+		btn.MouseLeave:Connect(function()
+			if not page.Visible then
+				TweenService:Create(btn, TweenInfo.new(0.1), { BackgroundColor3 = SMILE.BtnFace }):Play()
+			end
+		end)
+		btn.Activated:Connect(function()
+			selectAGTab(name)
+			if name == "RADAR" and UI.refreshRadar then
+				UI.refreshRadar()
+			end
+		end)
+
 		return page
 	end
 
-	local function makeActionBtn(parent, order, text, accentColor, heightPx, onClick)
+	local function makeAGButton(parent, text, isPrimary, stripeColor, order, height)
+		local baseCol = isPrimary and SMILE.BtnPressedRed or SMILE.BtnFace
+		local hoverCol = isPrimary and Color3.fromRGB(205, 40, 40) or SMILE.BtnHover
+		local txtCol = isPrimary and SMILE.TextLight or SMILE.TextDark
+
 		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(1, 0, 0, height or 28)
+		btn.BackgroundColor3 = baseCol
+		btn.BorderSizePixel = 0
+		btn.Text = ""
+		btn.AutoButtonColor = false
 		btn.LayoutOrder = order
-		btn.Size = UDim2.new(1, -4, 0, heightPx or 28)
+		btn.ZIndex = 5
+		btn.Parent = parent
+
+		local bev = createBevel(btn, false, 2)
+		addOutline(btn, SMILE.BorderOuter, 1)
+
+		if stripeColor then
+			local bar = Instance.new("Frame")
+			bar.Size = UDim2.new(0, 4, 1, -6)
+			bar.Position = UDim2.fromOffset(4, 3)
+			bar.BackgroundColor3 = stripeColor
+			bar.BorderSizePixel = 0
+			bar.ZIndex = 7
+			bar.Parent = btn
+		end
+
+		local inner = Instance.new("TextLabel")
+		inner.Size = UDim2.new(1, stripeColor and -12 or 0, 1, 0)
+		inner.Position = UDim2.fromOffset(stripeColor and 8 or 0, 0)
+		inner.BackgroundTransparency = 1
+		inner.Font = Enum.Font.GothamBold
+		inner.TextSize = 11
+		inner.TextColor3 = txtCol
+		inner.Text = text
+		inner.ZIndex = 7
+		inner.Parent = btn
+
+		btn.MouseEnter:Connect(function()
+			TweenService:Create(btn, TweenInfo.new(0.1), { BackgroundColor3 = hoverCol }):Play()
+		end)
+		btn.MouseLeave:Connect(function()
+			bev.setPressed(false)
+			inner.Position = UDim2.fromOffset(stripeColor and 8 or 0, 0)
+			TweenService:Create(btn, TweenInfo.new(0.1), { BackgroundColor3 = baseCol }):Play()
+		end)
+		btn.MouseButton1Down:Connect(function()
+			bev.setPressed(true)
+			inner.Position = UDim2.fromOffset((stripeColor and 8 or 0) + 1, 1)
+		end)
+		btn.MouseButton1Up:Connect(function()
+			bev.setPressed(false)
+			inner.Position = UDim2.fromOffset(stripeColor and 8 or 0, 0)
+		end)
+
+		return btn, inner
+	end
+
+	local function makeAGToggle(parent, label, initial, order, onToggle)
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(1, 0, 0, 27)
 		btn.BackgroundColor3 = SMILE.BtnFace
 		btn.BorderSizePixel = 0
-		btn.Font = Enum.Font.GothamBold
-		btn.TextSize = 11
-		btn.TextColor3 = SMILE.TextDark
-		btn.Text = text
+		btn.Text = ""
 		btn.AutoButtonColor = false
-		btn.ZIndex = parent.ZIndex + 1
+		btn.LayoutOrder = order
+		btn.ZIndex = 5
 		btn.Parent = parent
+		local bev = createBevel(btn, false, 2)
 		addOutline(btn, SMILE.BorderOuter, 1)
-		local bv = createBevel(btn, false, 1)
 
-		local strip = Instance.new("Frame")
-		strip.Size = UDim2.fromOffset(4, (heightPx or 28) - 4)
-		strip.Position = UDim2.fromOffset(2, 2)
-		strip.BackgroundColor3 = accentColor or SMILE.AccentRed
-		strip.BorderSizePixel = 0
-		strip.ZIndex = btn.ZIndex + 2
-		strip.Parent = btn
-
-		trackConn(btn.MouseEnter:Connect(function()
-			btn.BackgroundColor3 = SMILE.BtnHover
-		end))
-		trackConn(btn.MouseLeave:Connect(function()
-			btn.BackgroundColor3 = SMILE.BtnFace
-			bv.setPressed(false)
-		end))
-		trackConn(btn.MouseButton1Down:Connect(function()
-			bv.setPressed(true)
-		end))
-		trackConn(btn.MouseButton1Up:Connect(function()
-			bv.setPressed(false)
-		end))
-		trackConn(btn.MouseButton1Click:Connect(function()
-			if onClick then onClick(btn, strip) end
-		end))
-		return btn, strip, bv
-	end
-
-	local function makeSectionHeader(parent, order, text)
 		local lbl = Instance.new("TextLabel")
-		lbl.LayoutOrder = order
-		lbl.Size = UDim2.new(1, -4, 0, 18)
-		lbl.BackgroundColor3 = SMILE.InsetMid
-		lbl.BorderSizePixel = 0
-		lbl.Font = Enum.Font.GothamBlack
-		lbl.TextSize = 10
-		lbl.TextColor3 = SMILE.AccentGold
-		lbl.Text = " // " .. text
+		lbl.Size = UDim2.new(1, -58, 1, 0)
+		lbl.Position = UDim2.fromOffset(8, 0)
+		lbl.BackgroundTransparency = 1
+		lbl.Font = Enum.Font.GothamBold
+		lbl.TextSize = 11
+		lbl.TextColor3 = SMILE.TextDark
 		lbl.TextXAlignment = Enum.TextXAlignment.Left
-		lbl.ZIndex = parent.ZIndex + 1
-		lbl.Parent = parent
-		return lbl
-	end
+		lbl.TextTruncate = Enum.TextTruncate.AtEnd
+		lbl.Text = label
+		lbl.ZIndex = 7
+		lbl.Parent = btn
 
-	local function setStatus(text, col)
-		AGStatus.Text = tostring(text)
-		AGStatus.TextColor3 = col or SMILE.TextDark
-	end
+		local pill = Instance.new("Frame")
+		pill.Size = UDim2.fromOffset(42, 17)
+		pill.Position = UDim2.new(1, -48, 0.5, -8)
+		pill.BackgroundColor3 = SMILE.InsetDark
+		pill.BorderSizePixel = 0
+		pill.ZIndex = 7
+		pill.Parent = btn
+		createBevel(pill, true, 1)
 
-	local pageShield = createTabButton("SHIELD", "SHIELD")
-	local pageMap = createTabButton("MAP", "MAP")
-	local pageRadar = createTabButton("RADAR", "RADAR")
-	local pageLogs = createTabButton("LOGS", "LOGS")
+		local pillTxt = Instance.new("TextLabel")
+		pillTxt.Size = UDim2.fromScale(1, 1)
+		pillTxt.BackgroundTransparency = 1
+		pillTxt.Font = Enum.Font.Code
+		pillTxt.TextSize = 10
+		pillTxt.Text = initial and "ON" or "OFF"
+		pillTxt.TextColor3 = initial and SMILE.SuccessGreen or SMILE.TextMutedLight
+		pillTxt.ZIndex = 8
+		pillTxt.Parent = pill
 
-	function UI.setTab(tabId)
-		for id, pair in pairs(tabButtons) do
-			local active = (id == tabId)
-			tabPages[id].Visible = active
-			pair.btn.BackgroundColor3 = active and SMILE.BtnPressedRed or SMILE.BtnFace
-			pair.btn.TextColor3 = active and SMILE.TextLight or SMILE.TextDark
-			pair.bv.setPressed(active)
+		local current = initial
+		local function setVisual(v)
+			current = v
+			pillTxt.Text = v and "ON" or "OFF"
+			pillTxt.TextColor3 = v and SMILE.SuccessGreen or SMILE.TextMutedLight
 		end
-		if tabId == "RADAR" and UI.refreshRadar then
-			UI.refreshRadar()
+
+		btn.MouseEnter:Connect(function()
+			TweenService:Create(btn, TweenInfo.new(0.1), { BackgroundColor3 = SMILE.BtnHover }):Play()
+		end)
+		btn.MouseLeave:Connect(function()
+			bev.setPressed(false)
+			TweenService:Create(btn, TweenInfo.new(0.1), { BackgroundColor3 = SMILE.BtnFace }):Play()
+		end)
+		btn.MouseButton1Down:Connect(function()
+			bev.setPressed(true)
+		end)
+		btn.MouseButton1Up:Connect(function()
+			bev.setPressed(false)
+		end)
+		btn.Activated:Connect(function()
+			setVisual(not current)
+			onToggle(current, setVisual)
+		end)
+
+		return btn, setVisual
+	end
+
+	local agShieldPage = createAGTab("SHIELD", 1)
+	local agMapPage = createAGTab("MAP", 2)
+	local agRadarPage = createAGTab("RADAR", 3)
+	local agLogsPage = createAGTab("LOGS", 4)
+	selectAGTab("SHIELD")
+
+	local setLiveGuardVisual
+	local function setLiveGuard(on)
+		agState.liveGuard = on == true
+		if agState.liveGuard then
+			if not getActiveSnapshot() then
+				local count = Engine.takeSnapshot(agState.activeSlot)
+				if UI.updateStatus then
+					UI.updateStatus("Auto-snapshotted " .. count .. " parts", Color3.fromRGB(28, 128, 44))
+				end
+			else
+				syncPartWatchersToActiveSlot()
+			end
+			Engine.logEvent("Live Guard ENABLED", "INFO")
+		else
+			clearPartWatchers()
+			table.clear(Runtime.pendingDeleted)
+			table.clear(Runtime.pendingTampered)
+			Engine.logEvent("Live Guard DISABLED", "INFO")
+		end
+		if setLiveGuardVisual then
+			setLiveGuardVisual(agState.liveGuard)
+		end
+		if UI.updateTelemetry then
+			UI.updateTelemetry()
 		end
 	end
 
-	-- ========================================================================
-	-- PAGE 1: SHIELD
-	-- ========================================================================
-	makeSectionHeader(pageShield, 1, "CORE PROTECTION")
-
-	local liveBtn, liveStrip, liveBv = makeActionBtn(pageShield, 2, "LIVE GUARD: OFF", SMILE.AccentRed, 32, function()
-		setLiveGuard(not agState.liveGuard)
+	--// SHIELD TAB
+	local PanicBtn = makeAGButton(agShieldPage, "PANIC: PURGE + RESTORE MAP", true, SMILE.AccentGold, 1, 32)
+	PanicBtn.Activated:Connect(function()
+		if agState.isBusy then return end
+		agState.isBusy = true
+		UI.updateStatus("Running panic recovery...", SMILE.HeaderBot)
+		local resOk, resErr = withF3X(true, true, function(ep)
+			local purged = Engine.purgeSpam(ep, true)
+			local resMsg = Engine.restoreMap(ep)
+			UI.updateStatus("Panic: -" .. purged .. " | " .. resMsg, Color3.fromRGB(28, 128, 44))
+			return true
+		end)
+		if not resOk then
+			UI.updateStatus("F3X error: " .. tostring(resErr), SMILE.AccentRed)
+		end
+		agState.isBusy = false
 	end)
 
-	local filterBtn = makeActionBtn(pageShield, 3, "FILTER: Smart Threats", SMILE.AccentGold, 26, function(b)
+	_, setLiveGuardVisual = makeAGToggle(agShieldPage, "Live Anti-Grief Guard", agState.liveGuard, 2, function(on)
+		setLiveGuard(on)
+	end)
+
+	makeAGToggle(agShieldPage, "Auto-Clean Spam Queue", agState.autoClean, 3, function(on)
+		agState.autoClean = on
+		Engine.logEvent("Auto-Clean " .. (on and "ENABLED" or "DISABLED"), "INFO")
+	end)
+
+	makeAGToggle(agShieldPage, "Local Anti-Lag / Quarantine", agState.localQuarantine, 4, function(on)
+		agState.localQuarantine = on
+	end)
+
+	local ModeBtn, ModeLbl = makeAGButton(agShieldPage, "FILTER: " .. getFilterMode():upper(), false, SMILE.InfoBlue, 5, 28)
+	ModeBtn.Activated:Connect(function()
 		agState.filterModeIndex = (agState.filterModeIndex % #FILTER_MODES) + 1
-		b.Text = "FILTER: " .. getFilterMode()
-		Engine.logEvent("Filter mode -> " .. getFilterMode(), "INFO")
+		local mode = getFilterMode()
+		ModeLbl.Text = "FILTER: " .. mode:upper()
+		Engine.logEvent("Filter -> " .. mode, "INFO")
 		UI.updateTelemetry()
 	end)
 
-	local autoCleanBtn, autoCleanStrip = makeActionBtn(pageShield, 4, "AUTO-PURGE FOREIGN: ON", SMILE.SuccessGreen, 24, function(b, s)
-		agState.autoClean = not agState.autoClean
-		b.Text = "AUTO-PURGE FOREIGN: " .. (agState.autoClean and "ON" or "OFF")
-		s.BackgroundColor3 = agState.autoClean and SMILE.SuccessGreen or SMILE.BevelMid
+	makeAGToggle(agShieldPage, "Char + Joint + Seat Shield", agState.charShield, 6, function(on)
+		agState.charShield = on
 	end)
 
-	local charShieldBtn, charShieldStrip = makeActionBtn(pageShield, 5, "CHARACTER SHIELD: ON", SMILE.SuccessGreen, 24, function(b, s)
-		agState.charShield = not agState.charShield
-		b.Text = "CHARACTER SHIELD: " .. (agState.charShield and "ON" or "OFF")
-		s.BackgroundColor3 = agState.charShield and SMILE.SuccessGreen or SMILE.BevelMid
-	end)
-
-	local autoLockBtn, autoLockStrip = makeActionBtn(pageShield, 6, "AUTO-LOCK RESTORED & SELF: ON", SMILE.SuccessGreen, 24, function(b, s)
-		agState.autoLockAfterRestore = not agState.autoLockAfterRestore
-		agState.autoLockSelf = agState.autoLockAfterRestore
-		b.Text = "AUTO-LOCK RESTORED & SELF: " .. (agState.autoLockAfterRestore and "ON" or "OFF")
-		s.BackgroundColor3 = agState.autoLockAfterRestore and SMILE.SuccessGreen or SMILE.BevelMid
-	end)
-
-	local antiFlingBtn, antiFlingStrip = makeActionBtn(pageShield, 7, "ANTI-FLING & ANTI-VOID: ON", SMILE.SuccessGreen, 24, function(b, s)
-		local nxt = not agState.antiFling
-		agState.antiFling = nxt
-		agState.antiVoid = nxt
-		b.Text = "ANTI-FLING & ANTI-VOID: " .. (nxt and "ON" or "OFF")
-		s.BackgroundColor3 = nxt and SMILE.SuccessGreen or SMILE.BevelMid
-	end)
-
-	local localQBtn, localQStrip = makeActionBtn(pageShield, 8, "LOCAL QUARANTINE (NO F3X OK): ON", SMILE.InfoBlue, 24, function(b, s)
-		agState.localQuarantine = not agState.localQuarantine
-		b.Text = "LOCAL QUARANTINE (NO F3X OK): " .. (agState.localQuarantine and "ON" or "OFF")
-		s.BackgroundColor3 = agState.localQuarantine and SMILE.InfoBlue or SMILE.BevelMid
-	end)
-
-	local autoCounterBtn, autoCounterStrip = makeActionBtn(pageShield, 9, "AUTO-COUNTER (STRIP + CAGE): OFF", SMILE.BevelMid, 24, function(b, s)
-		agState.autoCounter = not agState.autoCounter
-		b.Text = "AUTO-COUNTER (STRIP + CAGE): " .. (agState.autoCounter and "ON" or "OFF")
-		s.BackgroundColor3 = agState.autoCounter and SMILE.AccentRed or SMILE.BevelMid
-	end)
-
-	local autoEquipBtn, autoEquipStrip = makeActionBtn(pageShield, 10, "AUTO-EQUIP F3X FOR ACTIONS: OFF", SMILE.BevelMid, 24, function(b, s)
-		agState.autoEquipF3X = not agState.autoEquipF3X
-		b.Text = "AUTO-EQUIP F3X FOR ACTIONS: " .. (agState.autoEquipF3X and "ON" or "OFF")
-		s.BackgroundColor3 = agState.autoEquipF3X and SMILE.AccentGold or SMILE.BevelMid
-	end)
-
-	function UI.refreshShieldToggles()
-		if agState.liveGuard then
-			liveBtn.Text = "LIVE GUARD: ON [ACTIVE]"
-			liveBtn.BackgroundColor3 = SMILE.BtnPressedRed
-			liveBtn.TextColor3 = SMILE.TextLight
-			liveStrip.BackgroundColor3 = SMILE.SuccessGreen
-			liveBv.setPressed(true)
-		else
-			liveBtn.Text = "LIVE GUARD: OFF"
-			liveBtn.BackgroundColor3 = SMILE.BtnFace
-			liveBtn.TextColor3 = SMILE.TextDark
-			liveStrip.BackgroundColor3 = SMILE.AccentRed
-			liveBv.setPressed(false)
-		end
-	end
-
-	-- ========================================================================
-	-- PAGE 2: MAP (SNAPSHOT SLOTS + RESTORE + SWEEP)
-	-- ========================================================================
-	makeSectionHeader(pageMap, 1, "SNAPSHOT SLOTS")
-
-	local slotRow = Instance.new("Frame")
-	slotRow.LayoutOrder = 2
-	slotRow.Size = UDim2.new(1, -4, 0, 26)
-	slotRow.BackgroundTransparency = 1
-	slotRow.ZIndex = pageMap.ZIndex + 1
-	slotRow.Parent = pageMap
-
-	local slotLayout = Instance.new("UIListLayout")
-	slotLayout.FillDirection = Enum.FillDirection.Horizontal
-	slotLayout.Padding = UDim.new(0, 4)
-	slotLayout.Parent = slotRow
-
-	local slotBtns = {}
-	for i = 1, 3 do
-		local sBtn = Instance.new("TextButton")
-		sBtn.Size = UDim2.new(1 / 3, -3, 1, 0)
-		sBtn.BackgroundColor3 = SMILE.BtnFace
-		sBtn.BorderSizePixel = 0
-		sBtn.Font = Enum.Font.GothamBlack
-		sBtn.TextSize = 10
-		sBtn.TextColor3 = SMILE.TextDark
-		sBtn.Text = "S" .. i .. ": EMPTY"
-		sBtn.AutoButtonColor = false
-		sBtn.ZIndex = slotRow.ZIndex + 1
-		sBtn.Parent = slotRow
-		addOutline(sBtn, SMILE.BorderOuter, 1)
-		local sBv = createBevel(sBtn, false, 1)
-		slotBtns[i] = { btn = sBtn, bv = sBv }
-
-		trackConn(sBtn.MouseButton1Click:Connect(function()
-			agState.activeSlot = i
-			agState.scanCursor = 1
-			syncPartWatchersToActiveSlot()
-			UI.refreshSlotButtons()
-			UI.updateTelemetry()
-			setStatus("SELECTED SLOT " .. i, SMILE.TextDark)
-		end))
-	end
-
-	function UI.refreshSlotButtons()
-		for i = 1, 3 do
-			local pair = slotBtns[i]
-			local snap = agState.snapshots[i]
-			local selected = (agState.activeSlot == i)
-			pair.btn.Text = snap and ("S" .. i .. ": " .. snap.count .. "P") or ("S" .. i .. ": EMPTY")
-			pair.btn.BackgroundColor3 = selected and SMILE.BtnPressedRed or SMILE.BtnFace
-			pair.btn.TextColor3 = selected and SMILE.TextLight or SMILE.TextDark
-			pair.bv.setPressed(selected)
-		end
-	end
-
-	makeSectionHeader(pageMap, 3, "MAP ACTIONS")
-
-	makeActionBtn(pageMap, 4, "SAVE SNAPSHOT TO ACTIVE SLOT", SMILE.InfoBlue, 28, function()
-		local count = Engine.takeSnapshot(agState.activeSlot)
-		setStatus("SAVED " .. count .. " PARTS -> S" .. agState.activeSlot, SMILE.TextDark)
-	end)
-
-	makeActionBtn(pageMap, 5, "ADOPT LEGIT NEW PARTS INTO SLOT", SMILE.AccentGold, 26, function()
-		local addedP, addedFx = Engine.adoptNewPartsIntoSnapshot()
-		setStatus(("ADOPTED +%d PARTS, +%d FX"):format(addedP, addedFx), SMILE.TextDark)
-	end)
-
-	makeActionBtn(pageMap, 6, "RESTORE MAP FROM SNAPSHOT", SMILE.SuccessGreen, 32, function()
-		setStatus("RESTORING MAP...", SMILE.TextDark)
-		task.spawn(function()
-			local _, res = withF3X(true, true, function(ep)
-				return Engine.restoreMap(ep)
+	makeAGToggle(agShieldPage, "Auto-Lock Self on Spawn", agState.autoLockSelf, 7, function(on)
+		agState.autoLockSelf = on
+		if on then
+			task.spawn(function()
+				withF3X(false, false, function(ep)
+					Engine.lockSelfCharacterParts(ep, true)
+				end)
 			end)
-			setStatus(tostring(res or "F3X MISSING"), SMILE.TextDark)
-		end)
+		end
 	end)
 
-	makeActionBtn(pageMap, 7, "PURGE GRIEF & SPAM EFFECTS", SMILE.AccentRed, 28, function()
-		task.spawn(function()
-			local _, msg = withF3X(true, true, function(ep)
-				local _, m = Engine.purgeSpam(ep, false)
-				return m
-			end)
-			setStatus(tostring(msg or "F3X MISSING"), SMILE.TextDark)
-		end)
+	makeAGToggle(agShieldPage, "Anti-Fling & Velocity Clamp", agState.antiFling, 8, function(on)
+		agState.antiFling = on
 	end)
 
-	makeActionBtn(pageMap, 8, "CLEAR FOREIGN BUILDS NEAR ME (45 STUDS)", SMILE.AccentRed, 26, function()
+	makeAGToggle(agShieldPage, "Anti-Void + Smart Rescue", agState.antiVoid, 9, function(on)
+		agState.antiVoid = on
+	end)
+
+	makeAGToggle(agShieldPage, "Auto-Equip F3X on Action", agState.autoEquipF3X, 10, function(on)
+		agState.autoEquipF3X = on
+	end)
+
+	makeAGToggle(agShieldPage, "Auto-Counter Repeat Griefers", agState.autoCounter, 11, function(on)
+		agState.autoCounter = on
+		Engine.logEvent("Auto-Counter " .. (on and "ARMED" or "OFF"), on and "COUNTER" or "INFO")
+	end)
+
+	local LockSelfRow = Instance.new("Frame")
+	LockSelfRow.Size = UDim2.new(1, 0, 0, 28)
+	LockSelfRow.BackgroundTransparency = 1
+	LockSelfRow.LayoutOrder = 12
+	LockSelfRow.ZIndex = 4
+	LockSelfRow.Parent = agShieldPage
+
+	local LockSelfBtn = makeAGButton(LockSelfRow, "LOCK SELF", false, SMILE.AccentGold, 1, 28)
+	LockSelfBtn.Size = UDim2.new(0.5, -2, 1, 0)
+	LockSelfBtn.Activated:Connect(function()
+		if agState.isBusy then return end
+		agState.isBusy = true
+		local res, err = withF3X(true, false, function(ep)
+			return Engine.lockSelfCharacterParts(ep, true)
+		end)
+		UI.updateStatus(res or err, res and Color3.fromRGB(28, 128, 44) or SMILE.AccentRed)
+		agState.isBusy = false
+	end)
+
+	local ClearMeBtn = makeAGButton(LockSelfRow, "CLEAR 45 STUDS", false, SMILE.AccentRed, 2, 28)
+	ClearMeBtn.Size = UDim2.new(0.5, -2, 1, 0)
+	ClearMeBtn.Position = UDim2.new(0.5, 4, 0, 0)
+	ClearMeBtn.Activated:Connect(function()
+		if agState.isBusy then return end
+		agState.isBusy = true
 		local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-		if not hrp then
-			setStatus("NO CHARACTER", SMILE.AccentRed)
-			return
-		end
-		task.spawn(function()
+		if hrp then
 			local _, msg = withF3X(true, true, function(ep)
 				local _, m = Engine.clearAroundPosition(ep, hrp.Position, AG_CONFIG.ClearRadius)
 				return m
 			end)
-			setStatus(tostring(msg or "F3X MISSING"), SMILE.TextDark)
-		end)
+			UI.updateStatus(msg or "F3X missing", Color3.fromRGB(28, 128, 44))
+		else
+			UI.updateStatus("Need character", SMILE.AccentRed)
+		end
+		agState.isBusy = false
 	end)
 
-	makeActionBtn(pageMap, 9, "LOCK ALL SNAPSHOT PARTS", SMILE.AccentGold, 26, function()
+	local PadBtn = makeAGButton(agShieldPage, "SPAWN RESCUE BASEPLATE", false, SMILE.BevelDark, 13, 28)
+	PadBtn.Activated:Connect(function()
+		if agState.isBusy then return end
+		agState.isBusy = true
+		local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			local ok = withF3X(true, true, function(ep)
+				return createFallbackBaseplate(ep, hrp.Position)
+			end)
+			if ok then
+				UI.updateStatus("Spawned 256x256 rescue pad", Color3.fromRGB(28, 128, 44))
+				Engine.logEvent("Spawned rescue baseplate", "INFO")
+			else
+				UI.updateStatus("Failed: F3X missing", SMILE.AccentRed)
+			end
+		else
+			UI.updateStatus("Failed: Root missing", SMILE.AccentRed)
+		end
+		agState.isBusy = false
+	end)
+
+	--// MAP TAB
+	local SlotRow = Instance.new("Frame")
+	SlotRow.Size = UDim2.new(1, 0, 0, 28)
+	SlotRow.BackgroundTransparency = 1
+	SlotRow.LayoutOrder = 1
+	SlotRow.ZIndex = 4
+	SlotRow.Parent = agMapPage
+
+	local SlotLayout = Instance.new("UIListLayout")
+	SlotLayout.FillDirection = Enum.FillDirection.Horizontal
+	SlotLayout.Padding = UDim.new(0, 4)
+	SlotLayout.Parent = SlotRow
+
+	local slotButtons = {}
+	function UI.refreshSlotButtons()
+		for i = 1, 3 do
+			local snap = agState.snapshots[i]
+			local b = slotButtons[i]
+			local active = (i == agState.activeSlot)
+			b.bevel.setPressed(active)
+			b.btn.BackgroundColor3 = active and SMILE.BtnPressedRed or SMILE.BtnFace
+			b.lbl.TextColor3 = active and SMILE.TextLight or SMILE.TextDark
+			b.lbl.Text = snap and ("S" .. i .. ":" .. snap.count) or ("SLOT " .. i)
+		end
+	end
+
+	for i = 1, 3 do
+		local sb = Instance.new("TextButton")
+		sb.Size = UDim2.new(0.333, -3, 1, 0)
+		sb.BackgroundColor3 = SMILE.BtnFace
+		sb.BorderSizePixel = 0
+		sb.Text = ""
+		sb.AutoButtonColor = false
+		sb.ZIndex = 5
+		sb.Parent = SlotRow
+		local bev = createBevel(sb, false, 2)
+		addOutline(sb, SMILE.BorderOuter, 1)
+
+		local slbl = Instance.new("TextLabel")
+		slbl.Size = UDim2.fromScale(1, 1)
+		slbl.BackgroundTransparency = 1
+		slbl.Font = Enum.Font.GothamBold
+		slbl.TextSize = 11
+		slbl.TextColor3 = SMILE.TextDark
+		slbl.Text = "SLOT " .. i
+		slbl.ZIndex = 7
+		slbl.Parent = sb
+
+		slotButtons[i] = { btn = sb, lbl = slbl, bevel = bev }
+		sb.Activated:Connect(function()
+			agState.activeSlot = i
+			syncPartWatchersToActiveSlot()
+			UI.refreshSlotButtons()
+			UI.updateTelemetry()
+			UI.updateStatus("Selected Snapshot Slot " .. i, SMILE.TextDark)
+		end)
+	end
+	UI.refreshSlotButtons()
+
+	local SnapBtn = makeAGButton(agMapPage, "TAKE / OVERWRITE SNAPSHOT", false, SMILE.InfoBlue, 2, 28)
+	SnapBtn.Activated:Connect(function()
+		if agState.isBusy then return end
+		agState.isBusy = true
+		local count = Engine.takeSnapshot(agState.activeSlot)
+		UI.updateStatus("Saved " .. count .. " parts to S" .. agState.activeSlot, Color3.fromRGB(28, 128, 44))
+		agState.isBusy = false
+	end)
+
+	local AdoptBtn = makeAGButton(agMapPage, "ADOPT NEW PARTS INTO SNAP", false, SMILE.AccentGold, 3, 28)
+	AdoptBtn.Activated:Connect(function()
+		if agState.isBusy then return end
+		agState.isBusy = true
+		local pAdded, eAdded = Engine.adoptNewPartsIntoSnapshot()
+		UI.updateStatus("Adopted +" .. pAdded .. "p / +" .. eAdded .. "fx", Color3.fromRGB(28, 128, 44))
+		agState.isBusy = false
+	end)
+
+	local DiffBtn = makeAGButton(agMapPage, "SCAN MAP INTEGRITY (DIFF)", false, SMILE.BevelDark, 4, 28)
+	DiffBtn.Activated:Connect(function()
 		local snap = getActiveSnapshot()
 		if not snap then
-			setStatus("NO SNAPSHOT IN SLOT", SMILE.AccentRed)
+			UI.updateStatus("No snapshot in active slot", SMILE.AccentRed)
 			return
 		end
-		task.spawn(function()
-			local ok = withF3X(true, true, function(ep)
-				local list = {}
-				for p, d in pairs(snap.parts) do
-					if p and p.Parent ~= nil then
-						table.insert(list, p)
-						d.Locked = true
-					end
-				end
-				return batchLockParts(ep, list, true)
-			end)
-			setStatus(ok and "LOCKED SNAPSHOT PARTS" or "F3X MISSING", SMILE.TextDark)
-		end)
+		local d = computeMapDiff(snap)
+		local msg = ("Del:%d Mov:%d Sz:%d Anc:%d Foreign:%d Fx:%d"):format(
+			#d.deleted, #d.moved, #d.resized, #d.reanchored, #d.foreignParts, #d.foreignEffects
+		)
+		UI.updateStatus(msg, SMILE.HeaderBot)
+		Engine.logEvent("Scan -> " .. msg, "INFO")
 	end)
 
-	-- ========================================================================
-	-- PAGE 3: RADAR (THREAT SCORING + WHITELIST/BLACKLIST + COUNTER ACTIONS)
-	-- ========================================================================
-	makeSectionHeader(pageRadar, 1, "SERVER THREAT RADAR")
+	local RestoreBtn = makeAGButton(agMapPage, "SMART RESTORE MAP", true, SMILE.SuccessGreen, 5, 30)
+	RestoreBtn.Activated:Connect(function()
+		if agState.isBusy then return end
+		agState.isBusy = true
+		UI.updateStatus("Restoring snapshot...", SMILE.HeaderBot)
+		local msg, err = withF3X(true, true, function(ep)
+			return Engine.restoreMap(ep)
+		end)
+		UI.updateStatus(msg or err, msg and Color3.fromRGB(28, 128, 44) or SMILE.AccentRed)
+		agState.isBusy = false
+	end)
 
-	local radarSummary = Instance.new("TextLabel")
-	radarSummary.LayoutOrder = 2
-	radarSummary.Size = UDim2.new(1, -4, 0, 20)
-	radarSummary.BackgroundTransparency = 1
-	radarSummary.Font = Enum.Font.Code
-	radarSummary.TextSize = 10
-	radarSummary.TextXAlignment = Enum.TextXAlignment.Left
-	radarSummary.TextColor3 = SMILE.TextMutedLight
-	radarSummary.Text = "Scanning server..."
-	radarSummary.ZIndex = pageRadar.ZIndex + 1
-	radarSummary.Parent = pageRadar
+	local PurgeBtn = makeAGButton(agMapPage, "PURGE FOREIGN PARTS & FX", false, SMILE.AccentRed, 6, 28)
+	PurgeBtn.Activated:Connect(function()
+		if agState.isBusy then return end
+		agState.isBusy = true
+		local _, msg = withF3X(true, true, function(ep)
+			local _, m = Engine.purgeSpam(ep, true)
+			return m
+		end)
+		UI.updateStatus(msg or "F3X missing", SMILE.HeaderBot)
+		agState.isBusy = false
+	end)
 
-	local radarList = Instance.new("Frame")
-	radarList.LayoutOrder = 3
-	radarList.Size = UDim2.new(1, -4, 0, 0)
-	radarList.AutomaticSize = Enum.AutomaticSize.Y
-	radarList.BackgroundTransparency = 1
-	radarList.ZIndex = pageRadar.ZIndex + 1
-	radarList.Parent = pageRadar
+	local LockRow = Instance.new("Frame")
+	LockRow.Size = UDim2.new(1, 0, 0, 28)
+	LockRow.BackgroundTransparency = 1
+	LockRow.LayoutOrder = 7
+	LockRow.ZIndex = 4
+	LockRow.Parent = agMapPage
 
-	local radarListLayout = Instance.new("UIListLayout")
-	radarListLayout.Padding = UDim.new(0, 5)
-	radarListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	radarListLayout.Parent = radarList
+	local LockBtn = makeAGButton(LockRow, "LOCK MAP", false, SMILE.AccentGold, 1, 28)
+	LockBtn.Size = UDim2.new(0.5, -2, 1, 0)
+	LockBtn.Activated:Connect(function()
+		if agState.isBusy then return end
+		agState.isBusy = true
+		local msg, err = withF3X(true, false, function(ep)
+			return Engine.lockMap(ep, true)
+		end)
+		UI.updateStatus(msg or err, SMILE.HeaderBot)
+		agState.isBusy = false
+	end)
+
+	local UnlockBtn = makeAGButton(LockRow, "UNLOCK MAP", false, SMILE.BevelMid, 2, 28)
+	UnlockBtn.Size = UDim2.new(0.5, -2, 1, 0)
+	UnlockBtn.Position = UDim2.new(0.5, 4, 0, 0)
+	UnlockBtn.Activated:Connect(function()
+		if agState.isBusy then return end
+		agState.isBusy = true
+		local msg, err = withF3X(true, false, function(ep)
+			return Engine.lockMap(ep, false)
+		end)
+		UI.updateStatus(msg or err, SMILE.TextDark)
+		agState.isBusy = false
+	end)
+
+	makeAGToggle(agMapPage, "Auto-Lock On Tamper / Restore", agState.autoLockAfterRestore, 8, function(on)
+		agState.autoLockAfterRestore = on
+	end)
+
+	local CleanManagedBtn = makeAGButton(agMapPage, "CLEAR PADS & CAGES", false, SMILE.BevelMid, 9, 28)
+	CleanManagedBtn.Activated:Connect(function()
+		if agState.isBusy then return end
+		agState.isBusy = true
+		local removed = withF3X(true, true, function(ep)
+			return Engine.destroyManagedArtifacts(ep)
+		end)
+		UI.updateStatus("Removed " .. tostring(removed or 0) .. " sentinel objects", SMILE.TextDark)
+		agState.isBusy = false
+	end)
+
+	--// RADAR TAB
+	local RadarActionRow = Instance.new("Frame")
+	RadarActionRow.Size = UDim2.new(1, 0, 0, 28)
+	RadarActionRow.BackgroundTransparency = 1
+	RadarActionRow.LayoutOrder = 1
+	RadarActionRow.ZIndex = 4
+	RadarActionRow.Parent = agRadarPage
+
+	local RefreshRadarBtn = makeAGButton(RadarActionRow, "REFRESH RADAR", false, SMILE.InfoBlue, 1, 28)
+	RefreshRadarBtn.Size = UDim2.new(0.55, -2, 1, 0)
+
+	local ResetThreatsBtn = makeAGButton(RadarActionRow, "RESET THREATS", false, SMILE.BevelMid, 2, 28)
+	ResetThreatsBtn.Size = UDim2.new(0.45, -2, 1, 0)
+	ResetThreatsBtn.Position = UDim2.new(0.55, 4, 0, 0)
+
+	local radarCards = {}
 
 	function UI.refreshRadar()
-		for _, child in ipairs(radarList:GetChildren()) do
-			if child:IsA("Frame") then
-				child:Destroy()
-			end
+		for _, card in ipairs(radarCards) do
+			if card and card.Parent then card:Destroy() end
 		end
+		table.clear(radarCards)
 
 		local entries = {}
-		local f3xCount = 0
 		for _, plr in ipairs(Players:GetPlayers()) do
 			if plr ~= LocalPlayer then
 				local hasF3X, equipped = playerHasF3X(plr)
-				if hasF3X then f3xCount += 1 end
 				local score = agState.threatScores[plr.UserId] or 0
-				local wl = agState.whitelist[plr.UserId] == true
-				local bl = agState.blacklist[plr.UserId] == true
-				local prio = (bl and 10000 or 0) + score * 20 + (equipped and 40 or (hasF3X and 20 or 0)) - (wl and 500 or 0)
+				local priority = (agState.blacklist[plr.UserId] and 10000 or 0)
+					+ (score * 10)
+					+ (equipped and 500 or (hasF3X and 100 or 0))
 				table.insert(entries, {
 					plr = plr,
 					hasF3X = hasF3X,
 					equipped = equipped,
 					score = score,
-					wl = wl,
-					bl = bl,
-					prio = prio,
+					priority = priority,
 				})
 			end
 		end
 
 		table.sort(entries, function(a, b)
-			if a.prio ~= b.prio then return a.prio > b.prio end
-			return a.plr.Name < b.plr.Name
+			if a.priority ~= b.priority then
+				return a.priority > b.priority
+			end
+			return a.plr.Name:lower() < b.plr.Name:lower()
 		end)
 
-		radarSummary.Text = ("PLAYERS: %d | F3X DETECTED: %d | WL: %d"):format(#entries, f3xCount, (function()
-			local n = 0
-			for _ in pairs(agState.whitelist) do n += 1 end
-			return math.max(0, n - 1)
-		end)())
+		local order = 2
+		for _, entry in ipairs(entries) do
+			local plr = entry.plr
+			local hasF3X, equipped, score = entry.hasF3X, entry.equipped, entry.score
+			local isWL = agState.whitelist[plr.UserId] == true
+			local isBL = agState.blacklist[plr.UserId] == true
+			local isCaged = Runtime.cagedPartsByUserId[plr.UserId] ~= nil
 
-		for idx, item in ipairs(entries) do
-			local p = item.plr
 			local card = Instance.new("Frame")
-			card.LayoutOrder = idx
-			card.Size = UDim2.new(1, 0, 0, 54)
-			card.BackgroundColor3 = SMILE.InsetMid
+			card.Size = UDim2.new(1, 0, 0, 74)
+			card.BackgroundColor3 = SMILE.WinFaceAlt
 			card.BorderSizePixel = 0
-			card.ZIndex = radarList.ZIndex + 1
-			card.Parent = radarList
-			addOutline(card, item.bl and SMILE.AccentRed or (item.wl and SMILE.SuccessGreen or SMILE.BevelDark), 1)
+			card.LayoutOrder = order
+			card.ZIndex = 5
+			card.Parent = agRadarPage
+			createBevel(card, false, 2)
+			addOutline(card, isBL and SMILE.AccentRed or SMILE.BorderOuter, 1)
+			table.insert(radarCards, card)
+			order += 1
 
-			local tagText = item.bl and "[BL]" or (item.wl and "[WL]" or (item.equipped and "[F3X!]" or (item.hasF3X and "[F3X]" or "[OK]")))
-			local tagCol = item.bl and SMILE.AccentRed or (item.wl and SMILE.SuccessGreen or (item.hasF3X and SMILE.AccentGold or SMILE.TextMutedLight))
+			local nameStrip = Instance.new("Frame")
+			nameStrip.Size = UDim2.new(1, -6, 0, 20)
+			nameStrip.Position = UDim2.fromOffset(3, 3)
+			nameStrip.BackgroundColor3 = (isBL or equipped) and SMILE.HeaderBot or SMILE.InsetDark
+			nameStrip.BorderSizePixel = 0
+			nameStrip.ZIndex = 6
+			nameStrip.Parent = card
 
-			local infoLbl = Instance.new("TextLabel")
-			infoLbl.Size = UDim2.new(1, -10, 0, 20)
-			infoLbl.Position = UDim2.fromOffset(6, 3)
-			infoLbl.BackgroundTransparency = 1
-			infoLbl.Font = Enum.Font.Code
-			infoLbl.TextSize = 11
-			infoLbl.TextXAlignment = Enum.TextXAlignment.Left
-			infoLbl.TextColor3 = tagCol
-			infoLbl.Text = ("%s %s  | T:%d"):format(tagText, p.Name, item.score)
-			infoLbl.ZIndex = card.ZIndex + 1
-			infoLbl.Parent = card
+			local nameLbl = Instance.new("TextLabel")
+			nameLbl.Size = UDim2.new(1, -8, 1, 0)
+			nameLbl.Position = UDim2.fromOffset(5, 0)
+			nameLbl.BackgroundTransparency = 1
+			nameLbl.Font = Enum.Font.Code
+			nameLbl.TextSize = 10
+			local tag = equipped and " [F3X HELD]" or (hasF3X and " [F3X]" or "")
+			if score > 0 then tag ..= (" [T:%d]"):format(score) end
+			if isWL then tag ..= " [WL]" end
+			if isBL then tag ..= " [BL]" end
+			nameLbl.Text = plr.DisplayName .. " (@" .. plr.Name .. ")" .. tag
+			nameLbl.TextColor3 = (isBL or equipped) and SMILE.TextLight or (hasF3X and SMILE.AccentGold or SMILE.TextLight)
+			nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+			nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+			nameLbl.ZIndex = 7
+			nameLbl.Parent = nameStrip
 
-			local btnRow = Instance.new("Frame")
-			btnRow.Size = UDim2.new(1, -10, 0, 22)
-			btnRow.Position = UDim2.fromOffset(5, 27)
-			btnRow.BackgroundTransparency = 1
-			btnRow.ZIndex = card.ZIndex + 1
-			btnRow.Parent = card
-
-			local bLay = Instance.new("UIListLayout")
-			bLay.FillDirection = Enum.FillDirection.Horizontal
-			bLay.Padding = UDim.new(0, 4)
-			bLay.Parent = btnRow
-
-			local function makeMiniBtn(label, wFrac, onClick)
-				local b = Instance.new("TextButton")
-				b.Size = UDim2.new(wFrac, -3, 1, 0)
-				b.BackgroundColor3 = SMILE.BtnFace
-				b.BorderSizePixel = 0
-				b.Font = Enum.Font.GothamBlack
-				b.TextSize = 9
-				b.TextColor3 = SMILE.TextDark
-				b.Text = label
-				b.AutoButtonColor = false
-				b.ZIndex = btnRow.ZIndex + 1
-				b.Parent = btnRow
-				addOutline(b, SMILE.BorderOuter, 1)
-				createBevel(b, false, 1)
-				trackConn(b.MouseButton1Click:Connect(onClick))
-				return b
+			local function makeMiniRow(yOffset)
+				local row = Instance.new("Frame")
+				row.Size = UDim2.new(1, -10, 0, 21)
+				row.Position = UDim2.fromOffset(5, yOffset)
+				row.BackgroundTransparency = 1
+				row.ZIndex = 6
+				row.Parent = card
+				local lay = Instance.new("UIListLayout")
+				lay.FillDirection = Enum.FillDirection.Horizontal
+				lay.Padding = UDim.new(0, 4)
+				lay.Parent = row
+				return row
 			end
 
-			makeMiniBtn(item.wl and "UN-WL" or "WL", 0.16, function()
-				agState.whitelist[p.UserId] = not item.wl or nil
-				if agState.whitelist[p.UserId] then agState.blacklist[p.UserId] = nil end
+			local function miniBtn(parent, widthScale, txt, isRed, col, cb)
+				local b = Instance.new("TextButton")
+				b.Size = UDim2.new(widthScale, -3, 1, 0)
+				b.BackgroundColor3 = isRed and SMILE.BtnPressedRed or SMILE.BtnFace
+				b.BorderSizePixel = 0
+				b.Text = ""
+				b.AutoButtonColor = false
+				b.ZIndex = 7
+				b.Parent = parent
+				local bev = createBevel(b, false, 1)
+				addOutline(b, SMILE.BorderOuter, 1)
+
+				local l = Instance.new("TextLabel")
+				l.Size = UDim2.fromScale(1, 1)
+				l.BackgroundTransparency = 1
+				l.Font = Enum.Font.GothamBold
+				l.TextSize = 10
+				l.TextColor3 = isRed and SMILE.TextLight or (col or SMILE.TextDark)
+				l.Text = txt
+				l.ZIndex = 9
+				l.Parent = b
+
+				b.MouseButton1Down:Connect(function() bev.setPressed(true) end)
+				b.MouseButton1Up:Connect(function() bev.setPressed(false) end)
+				b.MouseLeave:Connect(function() bev.setPressed(false) end)
+				b.Activated:Connect(cb)
+			end
+
+			local row1 = makeMiniRow(26)
+			miniBtn(row1, 0.25, isWL and "UN-WL" or "WL", false, isWL and Color3.fromRGB(28, 128, 44) or SMILE.TextDark, function()
+				agState.whitelist[plr.UserId] = not agState.whitelist[plr.UserId]
+				if agState.whitelist[plr.UserId] then
+					agState.blacklist[plr.UserId] = nil
+					agState.threatScores[plr.UserId] = 0
+				end
+				Engine.logEvent((agState.whitelist[plr.UserId] and "Whitelisted " or "Removed WL ") .. plr.Name, "INFO")
 				UI.refreshRadar()
 			end)
 
-			makeMiniBtn(item.bl and "UN-BL" or "BL", 0.16, function()
-				agState.blacklist[p.UserId] = not item.bl or nil
-				if agState.blacklist[p.UserId] then agState.whitelist[p.UserId] = nil end
+			miniBtn(row1, 0.25, isBL and "UN-BL" or "BL", isBL, SMILE.AccentRed, function()
+				agState.blacklist[plr.UserId] = not agState.blacklist[plr.UserId]
+				if agState.blacklist[plr.UserId] then
+					agState.whitelist[plr.UserId] = nil
+				end
+				Engine.logEvent((agState.blacklist[plr.UserId] and "Blacklisted " or "Unblacklisted ") .. plr.Name, "WARN")
 				UI.refreshRadar()
 			end)
 
-			makeMiniBtn("STRIP", 0.22, function()
-				task.spawn(function()
-					local _, msg = withF3X(true, true, function(ep)
-						local _, m = Engine.stripPlayerF3X(ep, p)
-						return m
-					end)
-					setStatus(tostring(msg or "F3X MISSING"), SMILE.TextDark)
-				end)
+			miniBtn(row1, 0.25, "TP", false, SMILE.InfoBlue, function()
+				local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+				local tHrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+				if myHrp and tHrp then
+					myHrp.AssemblyLinearVelocity = Vector3.zero
+					myHrp.CFrame = tHrp.CFrame * CFrame.new(0, 4, 4)
+				end
 			end)
 
-			local caged = Runtime.cagedPartsByUserId[p.UserId] ~= nil
-			makeMiniBtn(caged and "UNCAGE" or "CAGE", 0.23, function()
-				task.spawn(function()
-					local _, msg = withF3X(true, true, function(ep)
-						if Runtime.cagedPartsByUserId[p.UserId] then
-							Engine.uncagePlayer(ep, p)
-							return "Uncaged " .. p.Name
-						else
-							local _, m = Engine.cagePlayer(ep, p)
-							return m
-						end
-					end)
-					setStatus(tostring(msg or "F3X MISSING"), SMILE.TextDark)
-					task.defer(UI.refreshRadar)
-				end)
-			end)
-
-			makeMiniBtn("PURGE", 0.23, function()
-				task.spawn(function()
-					local _, msg = withF3X(true, true, function(ep)
-						local _, m = Engine.nukePlayerBuilds(ep, p)
+			miniBtn(row1, 0.25, "CLR 45", false, SMILE.TextDark, function()
+				if agState.isBusy then return end
+				agState.isBusy = true
+				local tHrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+				if tHrp then
+					local msg = withF3X(true, true, function(ep)
+						local _, m = Engine.clearAroundPosition(ep, tHrp.Position, AG_CONFIG.ClearRadius)
 						return m
 					end)
-					setStatus(tostring(msg or "F3X MISSING"), SMILE.TextDark)
+					UI.updateStatus(plr.Name .. ": " .. tostring(msg), SMILE.HeaderBot)
+				end
+				agState.isBusy = false
+			end)
+
+			local row2 = makeMiniRow(50)
+			miniBtn(row2, 0.333, isCaged and "UNCAGE" or "CAGE", not isCaged, isCaged and Color3.fromRGB(28, 128, 44) or SMILE.AccentRed, function()
+				if agState.isBusy then return end
+				agState.isBusy = true
+				local msg, err = withF3X(true, true, function(ep)
+					if Runtime.cagedPartsByUserId[plr.UserId] then
+						local _, m = Engine.uncagePlayer(ep, plr)
+						return m
+					else
+						return Engine.cagePlayer(ep, plr)
+					end
 				end)
+				UI.updateStatus(msg or err, SMILE.HeaderBot)
+				agState.isBusy = false
+				UI.refreshRadar()
+			end)
+
+			miniBtn(row2, 0.333, "STRIP F3X", false, SMILE.AccentRed, function()
+				if agState.isBusy then return end
+				agState.isBusy = true
+				local msg, err = withF3X(true, true, function(ep)
+					return Engine.stripPlayerF3X(ep, plr)
+				end)
+				UI.updateStatus(msg or err, SMILE.HeaderBot)
+				agState.isBusy = false
+				UI.refreshRadar()
+			end)
+
+			miniBtn(row2, 0.333, "CLR T", false, SMILE.TextMutedDark, function()
+				agState.threatScores[plr.UserId] = 0
+				UI.refreshRadar()
 			end)
 		end
 	end
 
-	-- ========================================================================
-	-- PAGE 4: LOGS
-	-- ========================================================================
-	makeSectionHeader(pageLogs, 1, "ACTIVITY LOG")
-
-	makeActionBtn(pageLogs, 2, "CLEAR LOGS", SMILE.AccentGold, 22, function()
-		for _, entry in ipairs(Runtime.agLogs) do
-			if entry and entry.Parent then entry:Destroy() end
-		end
-		table.clear(Runtime.agLogs)
+	RefreshRadarBtn.Activated:Connect(UI.refreshRadar)
+	ResetThreatsBtn.Activated:Connect(function()
+		table.clear(agState.threatScores)
+		UI.refreshRadar()
+		UI.updateStatus("Cleared all threat scores", SMILE.TextDark)
 	end)
 
+	--// LOGS TAB (CRT Terminal Output matching loader.lua LogBox)
+	local LogHeaderRow = Instance.new("Frame")
+	LogHeaderRow.Size = UDim2.new(1, 0, 0, 28)
+	LogHeaderRow.BackgroundTransparency = 1
+	LogHeaderRow.LayoutOrder = 1
+	LogHeaderRow.ZIndex = 4
+	LogHeaderRow.Parent = agLogsPage
+
+	local ClearLogsBtn = makeAGButton(LogHeaderRow, "CLEAR LOG", false, SMILE.BevelMid, 1, 28)
+	ClearLogsBtn.Size = UDim2.new(0.5, -2, 1, 0)
+
+	local ResetStatsBtn = makeAGButton(LogHeaderRow, "RESET COUNTERS", false, SMILE.AccentGold, 2, 28)
+	ResetStatsBtn.Size = UDim2.new(0.5, -2, 1, 0)
+	ResetStatsBtn.Position = UDim2.new(0.5, 4, 0, 0)
+
 	local AGLogContainer = Instance.new("Frame")
-	AGLogContainer.LayoutOrder = 3
-	AGLogContainer.Size = UDim2.new(1, -4, 0, 0)
+	AGLogContainer.Size = UDim2.new(1, 0, 0, 0)
 	AGLogContainer.AutomaticSize = Enum.AutomaticSize.Y
 	AGLogContainer.BackgroundTransparency = 1
-	AGLogContainer.ZIndex = pageLogs.ZIndex + 1
-	AGLogContainer.Parent = pageLogs
+	AGLogContainer.LayoutOrder = 2
+	AGLogContainer.ZIndex = 5
+	AGLogContainer.Parent = agLogsPage
 
-	local logLayout = Instance.new("UIListLayout")
-	logLayout.Padding = UDim.new(0, 3)
-	logLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	logLayout.Parent = AGLogContainer
+	local AGLogLayout = Instance.new("UIListLayout")
+	AGLogLayout.Padding = UDim.new(0, 2)
+	AGLogLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	AGLogLayout.Parent = AGLogContainer
 
-	function Engine.logEvent(msg, level)
-		Runtime.nextLogOrder -= 1
-		local col = SMILE.TextLight
-		if level == "BLOCK" or level == "COUNTER" then
-			col = SMILE.AccentRed
-		elseif level == "RESTORE" then
-			col = SMILE.SuccessGreen
-		elseif level == "WARN" then
-			col = SMILE.AccentGold
-		elseif level == "INFO" then
-			col = SMILE.InfoBlue
+	local agLogLabels = {}
+	local LOG_COLORS = {
+		INFO = SMILE.TextMutedLight,
+		BLOCK = SMILE.AccentRed,
+		RESTORE = SMILE.SuccessGreen,
+		WARN = SMILE.AccentGold,
+		SHIELD = SMILE.InfoBlue,
+		COUNTER = SMILE.AccentRed,
+	}
+
+	function Engine.logEvent(message, level)
+		local stamp = os.date("%H:%M:%S")
+		local line = ("[%s] %s"):format(stamp, tostring(message))
+		table.insert(Runtime.agLogs, 1, { text = line, level = level or "INFO" })
+		if #Runtime.agLogs > AG_CONFIG.MaxLogEntries then
+			table.remove(Runtime.agLogs)
 		end
 
-		local lbl = Instance.new("TextLabel")
-		lbl.LayoutOrder = Runtime.nextLogOrder
-		lbl.Size = UDim2.new(1, 0, 0, 0)
-		lbl.AutomaticSize = Enum.AutomaticSize.Y
-		lbl.BackgroundTransparency = 1
-		lbl.Font = Enum.Font.Code
-		lbl.TextSize = 10
-		lbl.TextWrapped = true
-		lbl.TextXAlignment = Enum.TextXAlignment.Left
-		lbl.TextColor3 = col
-		lbl.Text = ("[%s] %s"):format(os.date("%H:%M:%S"), tostring(msg))
-		lbl.ZIndex = AGLogContainer.ZIndex + 1
-		lbl.Parent = AGLogContainer
+		if AGLogContainer and AGLogContainer.Parent then
+			Runtime.nextLogOrder -= 1
+			local l = Instance.new("TextLabel")
+			l.Size = UDim2.new(1, 0, 0, 0)
+			l.AutomaticSize = Enum.AutomaticSize.Y
+			l.BackgroundTransparency = 1
+			l.Text = "> " .. line
+			l.TextColor3 = LOG_COLORS[level] or THEME.TextMain
+			l.Font = Enum.Font.Code
+			l.TextSize = 10
+			l.TextWrapped = true
+			l.TextXAlignment = Enum.TextXAlignment.Left
+			l.LayoutOrder = Runtime.nextLogOrder
+			l.ZIndex = 5
+			l.Parent = AGLogContainer
 
-		table.insert(Runtime.agLogs, 1, lbl)
-		while #Runtime.agLogs > AG_CONFIG.MaxLogEntries do
-			local old = table.remove(Runtime.agLogs)
-			if old and old.Parent then
-				old:Destroy()
+			table.insert(agLogLabels, 1, l)
+			if #agLogLabels > AG_CONFIG.MaxLogEntries then
+				local oldest = table.remove(agLogLabels)
+				if oldest then oldest:Destroy() end
 			end
 		end
 	end
+
+	ClearLogsBtn.Activated:Connect(function()
+		table.clear(Runtime.agLogs)
+		for _, lbl in ipairs(agLogLabels) do lbl:Destroy() end
+		table.clear(agLogLabels)
+	end)
+
+	ResetStatsBtn.Activated:Connect(function()
+		agState.threatsBlocked = 0
+		agState.restoresPerformed = 0
+		UI.updateTelemetry()
+		UI.updateStatus("Counters reset", SMILE.TextDark)
+	end)
 
 	function UI.updateTelemetry()
 		local snap = getActiveSnapshot()
-		local guardStr = agState.liveGuard and "ON" or "OFF"
-		local slotStr = snap and (snap.count .. "P") or "NONE"
-		AGTelemetry.Text = ("GUARD: %s | S%d: %s | BLK: %d | FIX: %d"):format(
-			guardStr,
-			agState.activeSlot,
-			slotStr,
-			agState.threatsBlocked,
-			agState.restoresPerformed
-		)
-		AGTelemetry.TextColor3 = agState.liveGuard and SMILE.SuccessGreen or SMILE.TextMutedLight
+		local snapStr = snap and ("S" .. agState.activeSlot .. ":" .. snap.count .. "p") or ("S" .. agState.activeSlot .. ":EMPTY")
+		local guardStr = agState.liveGuard and " | GUARD" or ""
+		AGTelemetry.Text = ("%s | BLK:%d | %s%s"):format(snapStr, agState.threatsBlocked, getFilterMode():upper(), guardStr)
 	end
 
-	-- ========================================================================
-	-- WINDOW OPEN / CLOSE / MINIMIZE + F3X BADGE POLLING
-	-- ========================================================================
-	local function positionWindowBesideMain()
-		local vp = getScreenSize(ScreenGui)
-		if MainFrame and MainFrame.Parent and MainFrame.Visible then
-			local mPos = MainFrame.AbsolutePosition
-			local mSize = MainFrame.AbsoluteSize
-			local scaledW = AG_FULL_W * AGScale.Scale
-			local x = mPos.X + mSize.X + 8
-			if x + scaledW > vp.X - 4 then
-				x = math.max(4, mPos.X - scaledW - 8)
-			end
-			local y = math.clamp(mPos.Y, 4, math.max(4, vp.Y - AG_FULL_H * AGScale.Scale - 4))
-			AGWindow.Position = UDim2.fromOffset(x, y)
-		else
-			AGWindow.Position = UDim2.fromOffset(math.max(8, vp.X - AG_FULL_W - 24), 48)
-		end
-		clampWindowToScreen(AGWindow, ScreenGui)
+	function UI.updateStatus(msg, color)
+		AGStatus.Text = "STATUS: " .. tostring(msg)
+		AGStatus.TextColor3 = color or SMILE.TextMutedDark
 	end
 
-	local function setOpen(open)
+	--// Smooth Open / Close / Minimize (matching loader.lua)
+	local agPositionedOnce = false
+	local function setAntiGriefOpen(open)
 		agState.windowOpen = open == true
+
 		if agState.windowOpen then
-			agState.windowMinimized = false
-			AGBody.Visible = true
-			AGTaskbar.Visible = true
-			AGMinBtn.Text = "_"
-			positionWindowBesideMain()
-			AGWindow.Size = UDim2.fromOffset(AG_FULL_W, AG_COLLAPSED_H)
+			AGBody.Visible = not agState.windowMinimized
+			AGTaskbar.Visible = not agState.windowMinimized
+			if not agPositionedOnce and MainFrame and MainFrame.Parent then
+				agPositionedOnce = true
+				local vp = getScreenSize(ScreenGui)
+				local sc = AGScale.Scale
+				local desiredX = MainFrame.AbsolutePosition.X + MainFrame.AbsoluteSize.X + 8
+				if desiredX + AG_FULL_W * sc > vp.X then
+					desiredX = math.max(4, vp.X - AG_FULL_W * sc - 4)
+				end
+				local desiredY = math.clamp(MainFrame.AbsolutePosition.Y, 4, math.max(4, vp.Y - AG_FULL_H * sc - 4))
+				AGWindow.Position = UDim2.fromOffset(desiredX, desiredY)
+			end
+
+			AGWindow.Size = AG_COLLAPSED_SIZE
 			AGWindow.Visible = true
-			TweenService:Create(
-				AGWindow,
-				TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-				{ Size = UDim2.fromOffset(AG_FULL_W, AG_FULL_H) }
-			):Play()
+			TweenService:Create(AGWindow, TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+				Size = agState.windowMinimized and AG_MIN_SIZE or AG_FULL_SIZE,
+			}):Play()
+
 			UI.refreshRadar()
 			UI.updateTelemetry()
 		else
-			local tw = TweenService:Create(
-				AGWindow,
-				TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
-				{ Size = UDim2.fromOffset(AG_FULL_W, AG_COLLAPSED_H) }
-			)
-			tw:Play()
-			task.delay(0.18, function()
-				if agAlive and not agState.windowOpen then
+			local tw = TweenService:Create(AGWindow, TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+				Size = AG_COLLAPSED_SIZE,
+			})
+			tw.Completed:Connect(function()
+				if not agState.windowOpen and AGWindow then
 					AGWindow.Visible = false
 				end
 			end)
+			tw:Play()
 		end
+
 		if type(onStateChanged) == "function" then
 			pcall(onStateChanged, agState.windowOpen)
 		end
 	end
 
-	local function toggle()
-		setOpen(not agState.windowOpen)
-	end
+	AGCloseBtn.Activated:Connect(function()
+		setAntiGriefOpen(false)
+	end)
 
-	local function toggleMinimize()
-		if not agState.windowOpen then return end
+	AGMinBtn.Activated:Connect(function()
 		agState.windowMinimized = not agState.windowMinimized
-		if agState.windowMinimized then
-			AGBody.Visible = false
-			AGTaskbar.Visible = false
-			AGMinBtn.Text = "+"
-			AGWindow.Size = UDim2.fromOffset(AG_FULL_W, AG_COLLAPSED_H)
-		else
+		if not agState.windowMinimized then
 			AGBody.Visible = true
 			AGTaskbar.Visible = true
-			AGMinBtn.Text = "_"
-			AGWindow.Size = UDim2.fromOffset(AG_FULL_W, AG_FULL_H)
-			clampWindowToScreen(AGWindow, ScreenGui)
 		end
-		agWindowBevel.setPressed(false)
-	end
+		local tw = TweenService:Create(AGWindow, TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+			Size = agState.windowMinimized and AG_MIN_SIZE or AG_FULL_SIZE,
+		})
+		tw.Completed:Connect(function()
+			if agState.windowMinimized and AGWindow and AGWindow.Parent then
+				AGBody.Visible = false
+				AGTaskbar.Visible = false
+			end
+			if AGWindow and AGWindow.Parent then
+				clampWindowToScreen(AGWindow, ScreenGui)
+			end
+		end)
+		tw:Play()
+		AGMinBtn.Text = agState.windowMinimized and "+" or "_"
+	end)
 
-	trackConn(AGMinBtn.MouseButton1Click:Connect(toggleMinimize))
-	trackConn(AGCloseBtn.MouseButton1Click:Connect(function()
-		setOpen(false)
-	end))
-
+	-- F3X Badge monitor
 	task.spawn(function()
 		while agAlive do
 			local ep, tool = getF3XEndpoint(false)
-			if ep and tool then
-				local inChar = LocalPlayer.Character and tool:IsDescendantOf(LocalPlayer.Character)
+			if ep then
+				local inChar = LocalPlayer.Character and tool and tool:IsDescendantOf(LocalPlayer.Character)
 				AGF3XBadge.Text = inChar and "F3X OK" or "IN PACK"
 				AGF3XBadge.TextColor3 = inChar and SMILE.SuccessGreen or SMILE.AccentGold
 			else
@@ -3163,52 +3635,60 @@ return function(ctx)
 		end
 	end)
 
-	UI.setTab("SHIELD")
-	UI.refreshSlotButtons()
-	UI.refreshShieldToggles()
+	Engine.logEvent("Sentinel Ultra subsystem online", "INFO")
 	UI.updateTelemetry()
 
 	importExistingCoreRigParts()
 	if AG_CONFIG.AutoSnapshotOnInit then
 		task.delay(0.4, function()
-			if agAlive and not agState.snapshots[1] then
-				importExistingCoreRigParts()
-				Engine.takeSnapshot(1, true)
+			if not agAlive or agState.snapshots[1] then return end
+			importExistingCoreRigParts()
+			local count = Engine.takeSnapshot(1, true)
+			if count > 0 then
+				Engine.logEvent("Auto-baseline S1 (" .. count .. " parts)", "INFO")
+				UI.updateStatus("Auto-backed up " .. count .. "p to S1", Color3.fromRGB(28, 128, 44))
 			end
 		end)
+	end
+
+	if createdOwnGui then
+		agState.windowOpen = true
+		UI.refreshRadar()
 	end
 
 	local controller
 
 	local function cleanup()
-		if not agAlive then return end
 		agAlive = false
 		agState.liveGuard = false
-		clearPartWatchers()
-		for _, c in ipairs(Runtime.charWatchConns) do
-			pcall(function() c:Disconnect() end)
-		end
-		table.clear(Runtime.charWatchConns)
-		for _, c in ipairs(agConnections) do
-			pcall(function() c:Disconnect() end)
-		end
-		table.clear(agConnections)
-		if createdOwnGui and ScreenGui and ScreenGui.Parent then
-			ScreenGui:Destroy()
-		elseif AGWindow and AGWindow.Parent then
-			AGWindow:Destroy()
-		end
 		if env.ULTRAKILL_ANTIGRIEF == controller then
 			env.ULTRAKILL_ANTIGRIEF = nil
 		end
 		if _G.ULTRAKILL_ANTIGRIEF == controller then
 			_G.ULTRAKILL_ANTIGRIEF = nil
 		end
+		clearCharWatchConns()
+		clearPartWatchers()
+		for _, conn in ipairs(agConnections) do
+			pcall(function() conn:Disconnect() end)
+		end
+		table.clear(agConnections)
+		table.clear(Runtime.protectedRigInstances)
+		table.clear(Runtime.cagedPartsByUserId)
+		table.clear(Runtime.charRootSet)
+		if AGWindow and AGWindow.Parent then
+			AGWindow:Destroy()
+		end
+		if createdOwnGui and ScreenGui and ScreenGui.Parent then
+			ScreenGui:Destroy()
+		end
 	end
 
 	controller = {
-		toggle = toggle,
-		setOpen = setOpen,
+		toggle = function()
+			setAntiGriefOpen(not agState.windowOpen)
+		end,
+		setOpen = setAntiGriefOpen,
 		isOpen = function()
 			return agState.windowOpen
 		end,
@@ -3227,7 +3707,9 @@ return function(ctx)
 		clearProtectedRig = function()
 			Runtime.protectedRigInstances = setmetatable({}, { __mode = "k" })
 		end,
-		takeSnapshot = Engine.takeSnapshot,
+		takeSnapshot = function(slot)
+			return Engine.takeSnapshot(slot or agState.activeSlot)
+		end,
 		setLiveGuard = setLiveGuard,
 		cleanup = cleanup,
 	}
