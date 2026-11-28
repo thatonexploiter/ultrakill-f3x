@@ -80,6 +80,70 @@ local Core = {
 }
 
 -- ============================================================================
+-- PONTE DE PROTECAO PARA O ANTIGRIEF.LUA (SEM DEPENDER DO LOADER.LUA)
+-- ============================================================================
+local function getAG()
+	local ag = env.ULTRAKILL_ANTIGRIEF or _G.ULTRAKILL_ANTIGRIEF
+	if type(ag) == "table" then
+		return ag
+	end
+	return nil
+end
+
+local function agMarkGrace(seconds)
+	local ag = getAG()
+	if ag and type(ag.markRigDeployGrace) == "function" then
+		pcall(ag.markRigDeployGrace, seconds)
+	end
+end
+
+local function agEndGrace()
+	local ag = getAG()
+	if ag and type(ag.endRigDeployGrace) == "function" then
+		pcall(ag.endRigDeployGrace)
+	end
+end
+
+local function agProtect(target)
+	local ag = getAG()
+	if not (ag and type(ag.protectInstance) == "function" and target) then return end
+	if typeof(target) == "Instance" then
+		pcall(ag.protectInstance, target)
+	elseif type(target) == "table" then
+		for _, item in pairs(target) do
+			if typeof(item) == "Instance" then
+				pcall(ag.protectInstance, item)
+			end
+		end
+	end
+end
+
+local function agUnprotect(target)
+	local ag = getAG()
+	if not (ag and type(ag.unprotectInstance) == "function" and target) then return end
+	if typeof(target) == "Instance" then
+		pcall(ag.unprotectInstance, target)
+	elseif type(target) == "table" then
+		for _, item in pairs(target) do
+			if typeof(item) == "Instance" then
+				pcall(ag.unprotectInstance, item)
+			end
+		end
+	end
+end
+
+local function agClearProtected()
+	local ag = getAG()
+	if ag and type(ag.clearProtectedRig) == "function" then
+		pcall(ag.clearProtectedRig)
+	end
+end
+
+function Core.protectInstance(inst)
+	agProtect(inst)
+end
+
+-- ============================================================================
 -- CONFIGURACAO PADRAO DO MOTOR
 -- ============================================================================
 local DEFAULT_CONFIG = {
@@ -236,8 +300,8 @@ local function getF3XEndpoint()
 		or (bp and bp:FindFirstChild("Building Tools+"))
 		or (c and c:FindFirstChild("Building Tools"))
 		or (bp and bp:FindFirstChild("Building Tools"))
-	local api = t and t:FindFirstChild("SyncAPI")
-	return api and api:FindFirstChild("ServerEndpoint")
+	local api = t and (t:FindFirstChild("SyncAPI") or t:FindFirstChild("SyncApi"))
+	return api and (api:FindFirstChild("ServerEndpoint") or api:FindFirstChild("ServerControl"))
 end
 
 local function f3x(ep, cmd, ...)
@@ -327,7 +391,19 @@ function Core.getState() return STATE end
 function Core.getConfig() return CONFIG end
 function Core.getChar() return getChar() end
 function Core.getEndpoint() return (STATE and STATE.ep and STATE.ep.Parent and STATE.ep) or getF3XEndpoint() end
-function Core.f3x(cmd, ...) return f3x(Core.getEndpoint(), cmd, ...) end
+
+-- Protege automaticamente qualquer part/clone criado por scripts de personagem via Core.f3x
+function Core.f3x(cmd, ...)
+	local isSpawnCmd = (cmd == "CreatePart" or cmd == "Clone")
+	if isSpawnCmd then
+		agMarkGrace(1.5)
+	end
+	local ok, res = f3x(Core.getEndpoint(), cmd, ...)
+	if isSpawnCmd and ok and res then
+		agProtect(res)
+	end
+	return ok, res
+end
 
 -- ============================================================================
 -- RASTREADOR DE ALVOS (PLAYERS E NPCS)
@@ -465,7 +541,10 @@ local function playSFX(key, pitchOverride, volumeScale, fallbackKey)
 	if not SoundService.RespectFilteringEnabled then
 		local c = getChar()
 		local hrp = c and c:FindFirstChild("HumanoidRootPart")
-		if hrp then parentTarget = hrp end
+		if hrp then
+			parentTarget = hrp
+			agProtect(snd)
+		end
 	end
 	snd.Parent = parentTarget
 	STATE.activeSounds[#STATE.activeSounds + 1] = snd
@@ -667,7 +746,6 @@ local function makeUKBox(parent, size, pos, bgTrans)
 	return box
 end
 
--- Constroi silhueta limpa de revolver/arma para o modulo de arma do HUD
 local function buildWeaponGlyph(parent, accentCol)
 	local wrap = Instance.new("Frame")
 	wrap.Size = UDim2.fromOffset(78, 36)
@@ -676,11 +754,11 @@ local function buildWeaponGlyph(parent, accentCol)
 	wrap.Parent = parent
 
 	local parts = {
-		{ UDim2.fromOffset(44, 10), UDim2.fromOffset(18, 4),  0, accentCol }, -- cano superior
-		{ UDim2.fromOffset(22, 12), UDim2.fromOffset(18, 12), 0, Color3.fromRGB(228, 232, 238) }, -- tambor
-		{ UDim2.fromOffset(14, 10), UDim2.fromOffset(6, 8),   0, Color3.fromRGB(195, 200, 210) }, -- parte traseira
-		{ UDim2.fromOffset(10, 18), UDim2.fromOffset(4, 14), 16, Color3.fromRGB(180, 185, 195) }, -- cabo
-		{ UDim2.fromOffset(16, 4),  UDim2.fromOffset(44, 13), 0, accentCol }, -- trilho frontal
+		{ UDim2.fromOffset(44, 10), UDim2.fromOffset(18, 4),  0, accentCol },
+		{ UDim2.fromOffset(22, 12), UDim2.fromOffset(18, 12), 0, Color3.fromRGB(228, 232, 238) },
+		{ UDim2.fromOffset(14, 10), UDim2.fromOffset(6, 8),   0, Color3.fromRGB(195, 200, 210) },
+		{ UDim2.fromOffset(10, 18), UDim2.fromOffset(4, 14), 16, Color3.fromRGB(180, 185, 195) },
+		{ UDim2.fromOffset(16, 4),  UDim2.fromOffset(44, 13), 0, accentCol },
 	}
 	for _, p in ipairs(parts) do
 		local f = Instance.new("Frame")
@@ -694,7 +772,6 @@ local function buildWeaponGlyph(parent, accentCol)
 	return wrap
 end
 
--- Constroi icone geometrico do braco Feedbacker estilo ULTRAKILL
 local function buildArmGlyph(parent, armCol)
 	local wrap = Instance.new("Frame")
 	wrap.Size = UDim2.fromOffset(58, 76)
@@ -703,12 +780,12 @@ local function buildArmGlyph(parent, armCol)
 	wrap.Parent = parent
 
 	local segs = {
-		{ UDim2.fromOffset(22, 12), UDim2.fromOffset(18, 52), 0, Color3.fromRGB(45, 72, 128) }, -- pulso
-		{ UDim2.fromOffset(28, 28), UDim2.fromOffset(15, 26), 0, armCol }, -- palma/antebraco
-		{ UDim2.fromOffset(8, 18),  UDim2.fromOffset(12, 8), -8, Color3.fromRGB(125, 215, 255) }, -- dedo 1
-		{ UDim2.fromOffset(8, 22),  UDim2.fromOffset(22, 4),  0, Color3.fromRGB(125, 215, 255) }, -- dedo 2
-		{ UDim2.fromOffset(8, 20),  UDim2.fromOffset(32, 6),  4, Color3.fromRGB(125, 215, 255) }, -- dedo 3
-		{ UDim2.fromOffset(12, 8),  UDim2.fromOffset(40, 28), -22, Color3.fromRGB(95, 190, 255) }, -- polegar
+		{ UDim2.fromOffset(22, 12), UDim2.fromOffset(18, 52), 0, Color3.fromRGB(45, 72, 128) },
+		{ UDim2.fromOffset(28, 28), UDim2.fromOffset(15, 26), 0, armCol },
+		{ UDim2.fromOffset(8, 18),  UDim2.fromOffset(12, 8), -8, Color3.fromRGB(125, 215, 255) },
+		{ UDim2.fromOffset(8, 22),  UDim2.fromOffset(22, 4),  0, Color3.fromRGB(125, 215, 255) },
+		{ UDim2.fromOffset(8, 20),  UDim2.fromOffset(32, 6),  4, Color3.fromRGB(125, 215, 255) },
+		{ UDim2.fromOffset(12, 8),  UDim2.fromOffset(40, 28), -22, Color3.fromRGB(95, 190, 255) },
 	}
 	for _, s in ipairs(segs) do
 		local f = Instance.new("Frame")
@@ -738,9 +815,6 @@ local function setupHUD()
 	local rightPart = makeHUDPanelPart(folder, "V1_HUD_Right", V(1.92, 1.72, 0.05))
 	STATE.hud.leftPart, STATE.hud.rightPart = leftPart, rightPart
 
-	-- ========================================================================
-	-- PAINEL ESQUERDO 3D (MODULOS SEPARADOS 50% PRETO, SEM BORDAS NEON)
-	-- ========================================================================
 	local leftGui = Instance.new("SurfaceGui")
 	leftGui.Name = "F3XV1_3DHUD_Left"
 	leftGui.Adornee = leftPart
@@ -759,7 +833,6 @@ local function setupHUD()
 	lFrame.BorderSizePixel = 0
 	lFrame.Parent = leftGui
 
-	-- 1. Caixa de Vida (Vermelho + Laranja Soft Damage + Cinza Hard Damage pela direita)
 	local hpBox = makeUKBox(lFrame, UDim2.fromOffset(620, 68), UDim2.fromOffset(0, 0))
 
 	local hpTrack = Instance.new("Frame")
@@ -812,7 +885,6 @@ local function setupHUD()
 	hdEdge.ZIndex = 6
 	hdEdge.Parent = hardDmgFill
 
-	-- Cruz '+' nitida formada por retangulos
 	local crossH = Instance.new("Frame")
 	crossH.Size = UDim2.fromOffset(22, 6)
 	crossH.Position = UDim2.fromOffset(14, 25)
@@ -844,7 +916,6 @@ local function setupHUD()
 	hpText.Parent = hpTrack
 	STATE.hud.hpText = hpText
 
-	-- 2. Barra de Stamina (3 segmentos ciano #0ddff0 / #03899c)
 	local stamBox = makeUKBox(lFrame, UDim2.fromOffset(620, 32), UDim2.fromOffset(0, 76))
 	local segCount = math.max(1, CONFIG.MAX_STAMINA)
 	local gap = 6
@@ -867,7 +938,6 @@ local function setupHUD()
 		STATE.hud.stamBars[i] = segFill
 	end
 
-	-- 3A. Painel da Arma (Esquerda) + 3B. Painel do Braco Feedbacker (Direita)
 	local wpnBox = makeUKBox(lFrame, UDim2.fromOffset(446, 164), UDim2.fromOffset(0, 116))
 	STATE.hud.wpnBox = wpnBox
 
@@ -892,7 +962,6 @@ local function setupHUD()
 	wpnTitle.Parent = wpnBox
 	STATE.hud.wpnTitle = wpnTitle
 
-	-- 4 Pips de Moeda / Carga
 	for i = 1, 4 do
 		local pipTrack = Instance.new("Frame")
 		pipTrack.Size = UDim2.fromOffset(98, 28)
@@ -909,7 +978,6 @@ local function setupHUD()
 		STATE.hud.coinPips[i] = pipFill
 	end
 
-	-- Barra estilo Railcannon / Carga Especial na base do painel da arma
 	local railLabel = Instance.new("TextLabel")
 	railLabel.Size = UDim2.new(1, -28, 0, 18)
 	railLabel.Position = UDim2.fromOffset(14, 102)
@@ -935,7 +1003,6 @@ local function setupHUD()
 	railFill.Parent = railTrack
 	STATE.hud.railFill = railFill
 
-	-- 3B. Caixa do Braco (Feedbacker)
 	local armBox = makeUKBox(lFrame, UDim2.fromOffset(166, 164), UDim2.fromOffset(454, 116))
 	local armAccent = Instance.new("Frame")
 	armAccent.Size = UDim2.new(1, 0, 0, 5)
@@ -960,7 +1027,6 @@ local function setupHUD()
 	armBarFill.Parent = armBarTrack
 	STATE.hud.armBarFill = armBarFill
 
-	-- 4. Speedometer compacto estilo ULTRA_REVAMP + status discreto de 1P Arms
 	if CONFIG.SHOW_SPEEDOMETER then
 		local spdBox = makeUKBox(lFrame, UDim2.fromOffset(156, 36), UDim2.fromOffset(0, 288))
 		STATE.hud.speedBox = spdBox
@@ -986,9 +1052,6 @@ local function setupHUD()
 	hintLbl.Parent = armsTagBox
 	STATE.hud.hint = hintLbl
 
-	-- ========================================================================
-	-- PAINEL DIREITO 3D (STYLE METER AUTENTICO DO ULTRAKILL)
-	-- ========================================================================
 	local rightGui = Instance.new("SurfaceGui")
 	rightGui.Name = "F3XV1_3DHUD_Right"
 	rightGui.Adornee = rightPart
@@ -1008,7 +1071,6 @@ local function setupHUD()
 	rFrame.Parent = rightGui
 	STATE.hud.rightFrame = rFrame
 
-	-- 1. Cabecalho do Rank de Estilo (D ESTRUCTIVE .. ULTRAKILL)
 	local rankBox = makeUKBox(rFrame, UDim2.fromOffset(520, 108), UDim2.fromOffset(0, 0))
 
 	local rankLabel = Instance.new("TextLabel")
@@ -1039,7 +1101,6 @@ local function setupHUD()
 	rankBarFill.Parent = rankBarBack
 	STATE.hud.rankBarFill = rankBarFill
 
-	-- 2. Feed de Bonus de Estilo (+ PARRY, + KILL, + GROUND SLAM)
 	local feedBox = makeUKBox(rFrame, UDim2.fromOffset(520, 250), UDim2.fromOffset(0, 116))
 
 	local feed = Instance.new("TextLabel")
@@ -1056,7 +1117,6 @@ local function setupHUD()
 	feed.Parent = feedBox
 	STATE.hud.styleFeed = feed
 
-	-- 3. Multiplicador de Movimento & Freshness (1.00x -> 3.00x no ar/slide)
 	local multBox = makeUKBox(rFrame, UDim2.fromOffset(520, 74), UDim2.fromOffset(0, 374))
 
 	local multTitle = Instance.new("TextLabel")
@@ -1096,9 +1156,6 @@ local function setupHUD()
 	multBarFill.Parent = multTrack
 	STATE.hud.multBarFill = multBarFill
 
-	-- ========================================================================
-	-- MIRA CENTRAL + CROSSHAIR HUD DE VIDA E STAMINA DO ULTRAKILL
-	-- ========================================================================
 	local crossGui = Instance.new("ScreenGui")
 	crossGui.Name = "F3XV1_Crosshair"
 	crossGui.ResetOnSpawn = false
@@ -1135,7 +1192,6 @@ local function setupHUD()
 		tick.Parent = cross
 	end
 
-	-- Barra vertical esquerda na mira (Vida + Soft/Hard Damage)
 	local cLeft = Instance.new("Frame")
 	cLeft.Size = UDim2.fromOffset(5, 48)
 	cLeft.Position = UDim2.new(0.5, -34, 0.5, -24)
@@ -1173,7 +1229,6 @@ local function setupHUD()
 	cHard.Parent = cLeft
 	STATE.hud.crossHardFill = cHard
 
-	-- Barra vertical direita na mira (3 blocos de Stamina)
 	local cRight = Instance.new("Frame")
 	cRight.Size = UDim2.fromOffset(5, 48)
 	cRight.Position = UDim2.new(0.5, 29, 0.5, -24)
@@ -1200,7 +1255,6 @@ local function setupHUD()
 		STATE.hud.crossStamBars[i] = fill
 	end
 
-	-- Hitmarker discreto no centro
 	local hitm = Instance.new("TextLabel")
 	hitm.Size = UDim2.fromOffset(30, 30)
 	hitm.Position = UDim2.new(0.5, -15, 0.5, -15)
@@ -1213,7 +1267,6 @@ local function setupHUD()
 	hitm.Parent = cross
 	STATE.hud.hitmarker = hitm
 
-	-- Indicador minimo de controles no PC ([H] abre painel compacto sem poluir o HUD)
 	if not UIS.TouchEnabled then
 		local helpHint = makeUKBox(crossGui, UDim2.fromOffset(118, 22), UDim2.new(1, -130, 1, -34), 0.55)
 		local helpHintTxt = Instance.new("TextLabel")
@@ -1247,7 +1300,6 @@ local function setupHUD()
 		STATE.hud.helpPanel = helpPanel
 	end
 
-	-- Atualizacao de inclinacao 3D (Sway natural do visor do ULTRAKILL)
 	RunService:BindToRenderStep(CONFIG.HUD_RENDER_NAME, Enum.RenderPriority.Camera.Value + 5, function(dt)
 		local curCam = workspace.CurrentCamera
 		local h = STATE and STATE.hud
@@ -1289,7 +1341,6 @@ local function setupHUD()
 		h.rightPart.CFrame = curCam.CFrame * C(rightPos) * angles(-5 + h.swayPitch, 180 - 16 + h.swayYaw, 1.5)
 	end)
 
-	-- Controles Mobile na formacao exata original, estilizados no padrao ULTRAKILL
 	if UIS.TouchEnabled then
 		local mobGui = Instance.new("ScreenGui")
 		mobGui.Name = "F3XV1_MobileControls"
@@ -1396,13 +1447,11 @@ local function updateHUD(hum, hrp, dt, isAir, hudStatus)
 	if not (CONFIG.ENABLE_HUD and h and h.leftPart and h.leftPart.Parent) then return end
 	local now = os.clock()
 
-	-- Rank atual (necessario tambem para taxa de decaimento de Hard Damage)
 	local rank = STYLE_RANKS[1]
 	for _, r in ipairs(STYLE_RANKS) do
 		if h.stylePoints >= r.min then rank = r end
 	end
 
-	-- Vida + Soft Damage laranja + Hard Damage cinza pela direita
 	local hpFrac, softFrac, hardFrac = 1, 1, 0
 	if hum then
 		local hp = math.max(0, hum.Health)
@@ -1443,13 +1492,11 @@ local function updateHUD(hum, hrp, dt, isAir, hudStatus)
 		end
 	end
 
-	-- Velocimetro
 	if hrp and h.speedLabel then
 		local spd = V(hrp.AssemblyLinearVelocity.X, 0, hrp.AssemblyLinearVelocity.Z).Magnitude
 		h.speedLabel.Text = string.format("%.2f u/s", spd)
 	end
 
-	-- Stamina (3 segmentos)
 	local prevStam = STATE.dash.stamina
 	if STATE.dash.stamina < CONFIG.MAX_STAMINA then
 		STATE.dash.stamina = math.min(CONFIG.MAX_STAMINA, STATE.dash.stamina + dt / CONFIG.STAMINA_REGEN_TIME)
@@ -1474,7 +1521,6 @@ local function updateHUD(hum, hrp, dt, isAir, hudStatus)
 		end
 	end
 
-	-- Painel da Arma + Barra de Carga + Pips
 	if hudStatus then
 		if h.wpnTitle and hudStatus.weaponTitle then h.wpnTitle.Text = hudStatus.weaponTitle end
 		if hudStatus.weaponColor then
@@ -1498,7 +1544,6 @@ local function updateHUD(hum, hrp, dt, isAir, hudStatus)
 		end
 	end
 
-	-- Animacao do braco Feedbacker (recuo + barra de exaustao)
 	if h.armBarFill and h.armIconWrap then
 		local rem = clamp((h.armPulseUntil - now) / 0.36, 0, 1)
 		local readyFrac = 1 - rem
@@ -1507,18 +1552,15 @@ local function updateHUD(hum, hrp, dt, isAir, hudStatus)
 		h.armIconWrap.Position = UDim2.new(0.5, -29, 0, 22 - math.floor(rem * 10))
 	end
 
-	-- Multiplicador de Movimento autentico (sobe ate 3.00x no ar ou deslizando)
 	if isAir or STATE.slide.active or STATE.dash.active then
 		h.styleMult = clamp(h.styleMult + dt * 2.0, 1.0, 3.0)
 	else
 		h.styleMult = clamp(h.styleMult - dt * 10.0, 1.0, 3.0)
 	end
 
-	-- Decaimento progressivo do Rank de Estilo
 	h.stylePoints = math.max(0, h.stylePoints - dt * rank.decay)
 	h.stylePop = math.max(0, h.stylePop - dt * 6.5)
 
-	-- Recalcula rank apos decaimento
 	rank = STYLE_RANKS[1]
 	for _, r in ipairs(STYLE_RANKS) do
 		if h.stylePoints >= r.min then rank = r end
@@ -1544,7 +1586,6 @@ local function updateHUD(hum, hrp, dt, isAir, hudStatus)
 		h.multBarFill.BackgroundColor3 = h.multLabel.TextColor3
 	end
 
-	-- Feed de Bonus
 	local lines = {}
 	for i = #h.styleFeedEntries, 1, -1 do
 		if now >= h.styleFeedEntries[i].expires then
@@ -1559,7 +1600,6 @@ local function updateHUD(hum, hrp, dt, isAir, hudStatus)
 	if h.styleFeed then h.styleFeed.Text = table.concat(lines, "\n") end
 	if h.hitmarker then h.hitmarker.Visible = now < h.hitmarkerUntil end
 
-	-- Atualizacao das barras laterais da mira (Crosshair HUD com fade automatico)
 	if h.crossHpFill and h.crossSoftFill and h.crossHardFill then
 		h.crossHpFill.Size = UDim2.fromScale(1, hpFrac)
 		h.crossSoftFill.Size = UDim2.fromScale(1, softFrac)
@@ -1863,7 +1903,6 @@ function Core.triggerHitstop(duration, tintColor)
 	STATE.hitstopCC.TintColor = tintColor or CONFIG.PARRY_FLASH
 end
 
--- Resolve o Model de personagem a partir de qualquer instancia passada
 local function resolveTargetModel(targetOrPart)
 	if not targetOrPart then return nil end
 	if typeof(targetOrPart) ~= "Instance" then return nil end
@@ -1878,7 +1917,6 @@ local function resolveTargetModel(targetOrPart)
 	return nil
 end
 
--- REWORK: Em vez de knockback/ragdoll complexo, remove o Torso (R6 ou R15) via F3X para matar o alvo instantaneamente
 function Core.applyF3XKnockback(targetChar, _dir, _power)
 	if not (STATE and STATE.alive and CONFIG.ENABLE_TORSO_KILL) then return end
 	targetChar = resolveTargetModel(targetChar)
@@ -1896,7 +1934,6 @@ function Core.applyF3XKnockback(targetChar, _dir, _power)
 		return
 	end
 
-	-- Coleta partes do torso (suporta R6 e R15)
 	local torsoParts = {}
 	for _, partName in ipairs({ "Torso", "UpperTorso", "LowerTorso" }) do
 		local p = targetChar:FindFirstChild(partName)
@@ -1920,7 +1957,6 @@ function Core.applyF3XKnockback(targetChar, _dir, _power)
 	local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
 	local closeKill = myHRP and ((killPos - myHRP.Position).Magnitude <= 26) or false
 
-	-- Executa remocao no servidor sem travar a renderizacao
 	task.spawn(function()
 		local ok = f3x(ep, "Remove", torsoParts)
 		if not ok then
@@ -1932,7 +1968,6 @@ function Core.applyF3XKnockback(targetChar, _dir, _power)
 		end
 	end)
 
-	-- Efeito de sangue + estilo ULTRAKILL ao abater
 	if closeKill then
 		spawnFlash(killPos, CONFIG.BLOOD_RED, 1.0, 4.4, 0.22)
 		if (now - STATE.lastSlamImpactAt) > 0.08 then
@@ -1998,10 +2033,10 @@ local function handleJumpAction()
 	local now = os.clock()
 	local isAir = isHumInAir(hum)
 
-	-- 1. Slam Storage Super-Jump
 	if STATE.slamStored and (now - STATE.lastSlamLand <= CONFIG.SLAM_STORAGE_WINDOW) then
 		STATE.slamStored = false
 		STATE.slam.active = false
+		STATE.slamJumpUntil = now + 0.45
 		local vel = hrp.AssemblyLinearVelocity
 		hrp.AssemblyLinearVelocity = V(vel.X, CONFIG.SLAM_STORAGE_JUMP, vel.Z)
 		STATE.fovKick = math.max(STATE.fovKick, 12)
@@ -2011,7 +2046,6 @@ local function handleJumpAction()
 		return
 	end
 
-	-- 2. Dash-Jump / Slide-Jump preservando momento horizontal
 	if not isAir and (STATE.dash.active or STATE.slide.active) then
 		local boostDir = (hum.MoveDirection.Magnitude > 0.1) and V(hum.MoveDirection.X, 0, hum.MoveDirection.Z).Unit or (STATE.dash.active and STATE.dash.dir or STATE.slide.dir)
 		local boostSpd = math.max(STATE.airVelXZ.Magnitude, CONFIG.DASH_SPEED * CONFIG.DASH_JUMP_MULT)
@@ -2024,7 +2058,6 @@ local function handleJumpAction()
 		return
 	end
 
-	-- 3. Wall-Kick no ar (com debounce rapido para evitar consumo duplo)
 	if isAir and CONFIG.WALL_JUMP_ENABLED and STATE.wallJumpsLeft > 0 and (now - STATE.lastWallJumpAt) > 0.14 then
 		local wallNormal, hitPos = findNearbyWallNormal(c, hrp)
 		if wallNormal then
@@ -2217,8 +2250,16 @@ end
 
 local function destroyAirPhysics()
 	if not STATE then return end
-	if STATE.antiGravForce then pcall(function() STATE.antiGravForce:Destroy() end); STATE.antiGravForce = nil end
-	if STATE.antiGravAtt then pcall(function() STATE.antiGravAtt:Destroy() end); STATE.antiGravAtt = nil end
+	if STATE.antiGravForce then
+		agUnprotect(STATE.antiGravForce)
+		pcall(function() STATE.antiGravForce:Destroy() end)
+		STATE.antiGravForce = nil
+	end
+	if STATE.antiGravAtt then
+		agUnprotect(STATE.antiGravAtt)
+		pcall(function() STATE.antiGravAtt:Destroy() end)
+		STATE.antiGravAtt = nil
+	end
 	STATE.isGliding = false
 	STATE.slamStored = false
 end
@@ -2268,6 +2309,7 @@ local function cleanupRigParts(ep)
 			toDel[#toDel + 1] = p
 		end
 	end
+	agUnprotect(toDel)
 	if ep and ep.Parent and #toDel > 0 then
 		tasks[#tasks + 1] = function()
 			for _, ch in ipairs(chunked(toDel, 40)) do invokeWithTimeout(ep, 1.5, "Remove", ch) end
@@ -2279,6 +2321,9 @@ local function cleanupRigParts(ep)
 		for _, p in ipairs(toDel) do if p and p.Parent then remaining[#remaining + 1] = p end end
 	end
 	STATE.proxyParts = remaining
+	if #remaining == 0 then
+		agClearProtected()
+	end
 	STATE.proxyAccessories = {}
 	STATE.modelEntries = {}
 	STATE.buckets = {}
@@ -2322,18 +2367,23 @@ setupRig = function()
 	STATE.setupId += 1
 	local mySetupId = STATE.setupId
 
+	agMarkGrace(12)
+
 	local okMain, errMain = xpcall(function()
 		local function finishAbort(ep, createdParts)
+			agUnprotect(createdParts)
+			agEndGrace()
 			if createdParts and #createdParts > 0 and ep and ep.Parent then
 				for _, ch in ipairs(chunked(createdParts, 40)) do invokeWithTimeout(ep, 1.5, "Remove", ch) end
 			end
 		end
 
 		local c = getChar() or plr.CharacterAdded:Wait()
-		if not waitForCharacterReady(c, mySetupId) then return end
+		if not waitForCharacterReady(c, mySetupId) then agEndGrace(); return end
 
 		local ep = waitForEndpoint(8, mySetupId)
 		if not ep then
+			agEndGrace()
 			warn("[F3X Ultrakill] 'Building Tools+' / 'Building Tools' nao encontrado!")
 			return
 		end
@@ -2341,12 +2391,13 @@ setupRig = function()
 		STATE.inFlight, STATE.lastSendAt = 0, 0
 
 		cleanupRigParts(ep)
+		agMarkGrace(12)
 		setupSounds()
 		setupHUD()
-		if not (STATE and STATE.alive and STATE.setupId == mySetupId) then return end
+		if not (STATE and STATE.alive and STATE.setupId == mySetupId) then agEndGrace(); return end
 
 		local hrp, hum = c:FindFirstChild("HumanoidRootPart"), c:FindFirstChildOfClass("Humanoid")
-		if not (hrp and hum and hum.Health > 0) then return end
+		if not (hrp and hum and hum.Health > 0) then agEndGrace(); return end
 
 		STATE.rigType = (hum.RigType == Enum.HumanoidRigType.R15) and "R15" or "R6"
 		local _, initYaw, _ = hrp.CFrame:ToEulerAnglesYXZ()
@@ -2366,6 +2417,7 @@ setupRig = function()
 			end)
 			local att = Instance.new("Attachment")
 			att.Name = "UK_MoveAtt"
+			agProtect(att)
 			att.Parent = hrp
 			local vf = Instance.new("VectorForce")
 			vf.Name = "UK_AntiGrav"
@@ -2373,6 +2425,7 @@ setupRig = function()
 			vf.RelativeTo = Enum.ActuatorRelativeTo.World
 			vf.ApplyAtCenterOfMass = true
 			vf.Force = V(0, 0, 0)
+			agProtect(vf)
 			vf.Parent = hrp
 			STATE.antiGravAtt = att
 			STATE.antiGravForce = vf
@@ -2427,7 +2480,6 @@ setupRig = function()
 		local specs = CHAR_DEF.buildModel(Core, c, hrp, hum, torsoInitCF) or {}
 		for _, asp in ipairs(accSpecs) do specs[#specs + 1] = asp end
 
-		-- Partes de FX compartilhadas (sem partes antigas de seat/ram)
 		specs[#specs + 1] = { kind = "fx_coin",   partType = "Cylinder", origCF = PARK_CF, origSize = V(0.14, 0.60, 0.60), origColor = CONFIG.COIN_GOLD,   origMaterial = Enum.Material.Neon, origTrans = 1, origReflectance = 0 }
 		specs[#specs + 1] = { kind = "fx_beam1",  partType = "Normal",   origCF = PARK_CF, origSize = V(0.22, 0.22, 1),    origColor = CONFIG.YELLOW_NEON, origMaterial = Enum.Material.Neon, origTrans = 1, origReflectance = 0 }
 		specs[#specs + 1] = { kind = "fx_beam2",  partType = "Normal",   origCF = PARK_CF, origSize = V(0.38, 0.38, 1),    origColor = CONFIG.BEAM_CYAN,   origMaterial = Enum.Material.Neon, origTrans = 1, origReflectance = 0 }
@@ -2438,12 +2490,14 @@ setupRig = function()
 		specs[#specs + 1] = { kind = "fx_ring",   partType = "Cylinder", origCF = PARK_CF, origSize = V(0.14, 1.6, 1.6),   origColor = CONFIG.BEAM_CYAN,   origMaterial = Enum.Material.Neon, origTrans = 1, origReflectance = 0 }
 
 		local function spawnSpecsBatch(specList)
+			agMarkGrace(12)
 			local tasks = {}
 			for _, spec in ipairs(specList) do
 				tasks[#tasks + 1] = function()
 					if not (STATE and STATE.alive and STATE.setupId == mySetupId) or spec.newPart then return end
 					local ok, p = f3x(ep, "CreatePart", spec.partType or "Normal", PARK_CF, workspace)
 					if ok and typeof(p) == "Instance" and p:IsA("BasePart") then
+						agProtect(p)
 						lockProxyPhysics(p)
 						attachNoColToCharacter(p, c)
 						createdThisSetup[#createdThisSetup + 1] = p
@@ -2470,10 +2524,15 @@ setupRig = function()
 			return
 		end
 
+		-- Garante que todas as partes e filhos futuros criados no setup fiquem protegidos antes de encerrar a janela de grace
+		agProtect(STATE.proxyParts)
+		agEndGrace()
+
 		local pendingEntries = {}
 		for _, spec in ipairs(specs) do
 			local p = spec.newPart
 			if p and p.Parent then
+				agProtect(p)
 				lockProxyPhysics(p)
 				resizeItems[#resizeItems + 1] = { Part = p, Size = spec.origSize, CFrame = spec.origCF }
 				colorItems[#colorItems + 1] = { Part = p, Color = spec.origColor, UnionColoring = true }
@@ -2505,7 +2564,6 @@ setupRig = function()
 			end
 		end
 
-		-- Trava ancora e colisao primeiro em paralelo antes de posicionar
 		local lockTasks = {}
 		for _, ch in ipairs(chunked(anchorItems, CONFIG.SYNC_CHUNK)) do lockTasks[#lockTasks + 1] = function() f3x(ep, "SyncAnchor", ch) end end
 		for _, ch in ipairs(chunked(colItems, CONFIG.SYNC_CHUNK)) do lockTasks[#lockTasks + 1] = function() f3x(ep, "SyncCollision", ch) end end
@@ -2531,7 +2589,6 @@ setupRig = function()
 			function() if #syncLightQueue > 0 then f3x(ep, "SyncLighting", syncLightQueue) end end,
 		}, 2, 6)
 
-		-- Verificacao final de integridade do rig (garante Anchored = true e CanCollide = false)
 		local fixAnchors, fixCols, verifiedCount = {}, {}, 0
 		for _, entry in ipairs(pendingEntries) do
 			local p = entry.part
@@ -2607,6 +2664,7 @@ setupRig = function()
 	end, debug.traceback)
 
 	if not okMain then
+		agEndGrace()
 		warn("[F3X Ultrakill] setupRig error: " .. tostring(errMain))
 	end
 	if STATE then STATE.isSettingUp = false end
@@ -2615,6 +2673,7 @@ end
 forceRebuild = function()
 	if not (STATE and STATE.alive) then return end
 	print("[F3X Ultrakill] F7 Force Rebuild triggered.")
+	agMarkGrace(12)
 	STATE.setupId += 1
 	STATE.isSettingUp = false
 	STATE.inFlight, STATE.lastSendAt = 0, 0
@@ -2688,6 +2747,7 @@ function Core.start(charDef)
 		lastSlamLand = 0,
 		lastSlamImpactAt = 0,
 		slamStored = false,
+		slamJumpUntil = 0,
 		antiGravAtt = nil,
 		antiGravForce = nil,
 
@@ -2740,12 +2800,29 @@ function Core.start(charDef)
 	env.F3XUltrakillRebuild = forceRebuild
 	env.F3XV1ReanimCleanup = cleanup
 	env.F3XV1ReanimRebuild = forceRebuild
-	env.ULTRAKILL_F3X = { cleanup = cleanup, rebuild = forceRebuild }
+	env.ULTRAKILL_F3X = {
+		cleanup = cleanup,
+		rebuild = forceRebuild,
+		getProtectedParts = function()
+			local out = {}
+			if STATE and STATE.alive then
+				for _, p in ipairs(STATE.proxyParts) do
+					out[#out + 1] = p
+				end
+				if STATE.antiGravForce then out[#out + 1] = STATE.antiGravForce end
+				if STATE.antiGravAtt then out[#out + 1] = STATE.antiGravAtt end
+			end
+			return out
+		end,
+		isHighSpeedAction = function()
+			if not (STATE and STATE.alive) then return false end
+			return STATE.dash.active or STATE.slam.active or STATE.slamStored or (os.clock() < (STATE.slamJumpUntil or 0))
+		end,
+	}
 
 	initTargetTracker()
 	task.spawn(setupRig)
 
-	-- Mantem partes do rig estritamente ancoradas e sem colisao
 	table.insert(STATE.connections, RunService.Stepped:Connect(function()
 		if not (STATE and STATE.alive) then return end
 		for _, p in ipairs(STATE.proxyParts) do
@@ -2919,7 +2996,6 @@ function Core.start(charDef)
 			end
 		end
 
-		-- Fisica aerea flutuante + planagem com asas + Air-Strafe livre
 		if CONFIG.ENABLE_AIR_MOVEMENT and STATE.antiGravForce and STATE.antiGravForce.Parent then
 			if isAir and not STATE.slam.active and not STATE.dash.active then
 				local holdingJump = (not typing) and (UIS:IsKeyDown(Enum.KeyCode.Space) or hum.Jump)
@@ -2972,7 +3048,6 @@ function Core.start(charDef)
 			end
 		end
 
-		-- Animacao dos feixes e efeitos compartilhados
 		local ba = STATE.beamAnim
 		if ba.active and STATE.beam1Part and STATE.beam2Part then
 			local bEl = nowClock - ba.startTime
@@ -3118,6 +3193,7 @@ function Core.start(charDef)
 
 	table.insert(STATE.connections, plr.CharacterAdded:Connect(function()
 		if not STATE then return end
+		agMarkGrace(12)
 		STATE.setupId += 1
 		STATE.isSettingUp = false
 		STATE.inFlight, STATE.lastSendAt = 0, 0
