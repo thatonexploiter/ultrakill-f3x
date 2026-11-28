@@ -590,13 +590,13 @@ return function(Core)
 
 			-- Cão (Hammer) & Gatilho animados
 			specs[#specs + 1] = {
-				kind = "v1gunHammer", partType = "Normal", size = V(0.06, 0.08, 0.14),
-				color = PALETTE.SILVER_TRIM, mat = Enum.Material.Metal, ref = 0.25,
+				kind = "v1gunHammer", partType = "Normal", origSize = V(0.06, 0.08, 0.14),
+				origColor = PALETTE.SILVER_TRIM, origMaterial = Enum.Material.Metal,
 				relCF = C(0, 0.03, -0.05), origCF = gunInitCF * C(0, -0.26, -0.22) * angles(18, 0, 0) * C(0, 0.03, -0.05), origTrans = 0, origReflectance = 0.25,
 			}
 			specs[#specs + 1] = {
-				kind = "v1gunTrigger", partType = "Normal", size = V(0.04, 0.05, 0.12),
-				color = PALETTE.GUN_STEEL, mat = Enum.Material.Metal, ref = 0.20,
+				kind = "v1gunTrigger", partType = "Normal", origSize = V(0.04, 0.05, 0.12),
+				origColor = PALETTE.GUN_STEEL, origMaterial = Enum.Material.Metal,
 				relCF = C(0, -0.02, -0.04), origCF = gunInitCF * C(0, -0.39, -0.03) * angles(-20, 0, 0) * C(0, -0.02, -0.04), origTrans = 0, origReflectance = 0.20,
 			}
 
@@ -604,8 +604,8 @@ return function(Core)
 			for pipIdx = 1, MAX_COINS do
 				local xOff = -0.0675 + (pipIdx - 1) * 0.045
 				specs[#specs + 1] = {
-					kind = "v1gunPip", pipIdx = pipIdx, partType = "Normal", size = V(0.032, 0.018, 0.09),
-					color = PALETTE.MARKSMAN_GREEN, mat = Enum.Material.Neon,
+					kind = "v1gunPip", pipIdx = pipIdx, partType = "Normal", origSize = V(0.032, 0.018, 0.09),
+					origColor = PALETTE.MARKSMAN_GREEN, origMaterial = Enum.Material.Neon,
 					relCF = C(xOff, 0.018, 0), origCF = gunInitCF * C(0, -0.14, -0.355) * angles(22, 0, 0) * C(xOff, 0.018, 0), origTrans = 0, origReflectance = 0, gunNeon = true,
 				}
 			end
@@ -620,8 +620,8 @@ return function(Core)
 			}
 			for _, mf in ipairs(muzzleRel) do
 				specs[#specs + 1] = {
-					kind = "v1gunMuzzle", partType = "Normal", size = mf.size,
-					color = PALETTE.EYE_CORE, mat = Enum.Material.Neon,
+					kind = "v1gunMuzzle", partType = "Normal", origSize = mf.size,
+					origColor = PALETTE.EYE_CORE, origMaterial = Enum.Material.Neon,
 					relCF = mf.relCF, origCF = PARK_CF, origTrans = 0, origReflectance = 0,
 				}
 			end
@@ -629,8 +629,8 @@ return function(Core)
 			-- 3 moedas extras para suportar até 4 moedas simultâneas no ar
 			for coinIdx = 2, MAX_COINS do
 				specs[#specs + 1] = {
-					kind = "v1coin", coinIdx = coinIdx, partType = "Cylinder", size = V(0.08, 0.48, 0.48),
-					color = PALETTE.COIN_GOLD, mat = Enum.Material.Metal,
+					kind = "v1coin", coinIdx = coinIdx, partType = "Cylinder", origSize = V(0.08, 0.48, 0.48),
+					origColor = PALETTE.COIN_GOLD, origMaterial = Enum.Material.Metal,
 					relCF = ID_CF, origCF = PARK_CF, origTrans = 0, origReflectance = 0.42,
 				}
 			end
