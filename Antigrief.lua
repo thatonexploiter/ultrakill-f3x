@@ -91,6 +91,18 @@ local EXTRA_DECOR_CLASSES = {
 	ShirtGraphic = true,
 }
 
+local FOREIGN_UK_ALLOWED_CHILD_CLASSES = {
+	SpecialMesh = true,
+	BlockMesh = true,
+	CylinderMesh = true,
+	PointLight = true,
+	SpotLight = true,
+	Attachment = true,
+	NoCollisionConstraint = true,
+	Weld = true,
+	WeldConstraint = true,
+}
+
 local HOSTILE_JOINT_OR_MOVER_CLASSES = {
 	Weld = true,
 	WeldConstraint = true,
@@ -175,6 +187,13 @@ local TRACKED_PART_PROPS = {
 	Reflectance = true,
 	Locked = true,
 }
+
+local function parseUKUserTag(name)
+	if type(name) ~= "string" then return nil, nil end
+	local uidStr, label = name:match("^UKF3X_(%-?%d+)_(.+)$")
+	if not uidStr then return nil, nil end
+	return tonumber(uidStr), label
+end
 
 local function getGuiParent()
 	local ok, hui = pcall(function()
@@ -517,6 +536,10 @@ return function(ctx)
 		AutoCounterThreshold = 14,
 		AutoCounterCooldown = 15,
 		AutoSnapshotOnInit = true,
+		ForeignUKMaxSize = 18,
+		ForeignUKMaxBeamLength = 250,
+		ForeignUKMaxPartsPerPlayer = 260,
+		ForeignUKVerifyGrace = 0.28,
 	}
 
 	local FILTER_MODES = { "Effects Only", "Smart Threats", "Strict Lockdown" }
@@ -533,6 +556,7 @@ return function(ctx)
 		liveGuard = false,
 		autoClean = true,
 		localQuarantine = true,
+		trustOtherUKRigs = true,
 		filterModeIndex = 2,
 		antiFling = true,
 		antiVoid = true,
@@ -559,6 +583,7 @@ return function(ctx)
 		charRootSet = {},
 		scriptManagedParts = setmetatable({}, { __mode = "k" }),
 		protectedRigInstances = setmetatable({}, { __mode = "k" }),
+		foreignUKPartsByUid = {},
 		cagedPartsByUserId = {},
 		recentForeignBuffer = {},
 		tamperHits = setmetatable({}, { __mode = "k" }),
@@ -670,6 +695,90 @@ return function(ctx)
 			return true
 		end
 		return false
+	end
+
+	local function getForeignUKPartCount(uid)
+		local bucket = Runtime.foreignUKPartsByUid[uid]
+		if not bucket then return 0 end
+		local count = 0
+		for p in pairs(bucket) do
+			if p and p.Parent ~= nil and p:IsDescendantOf(workspace) then
+				count += 1
+			else
+				bucket[p] = nil
+			end
+		end
+		return count
+	end
+
+	local function isVerifiedForeignUKPart(inst)
+		if not agState.trustOtherUKRigs or not inst or not inst.Parent then
+			return false, nil
+		end
+
+		local basePart = nil
+		if inst:IsA("BasePart") then
+			basePart = inst
+		elseif FOREIGN_UK_ALLOWED_CHILD_CLASSES[inst.ClassName] then
+			basePart = inst:FindFirstAncestorWhichIsA("BasePart")
+		else
+			return false, nil
+		end
+
+		if not basePart or not basePart.Parent then
+			return false, nil
+		end
+
+		local uid, label = parseUKUserTag(basePart.Name)
+		if not uid or uid == LocalPlayer.UserId then
+			return false, nil
+		end
+
+		local owner = Players:GetPlayerByUserId(uid)
+		if not owner or agState.blacklist[uid] then
+			return false, nil
+		end
+
+		if basePart:IsA("Seat") or basePart:IsA("VehicleSeat") or basePart:IsA("SpawnLocation") then
+			return false, nil
+		end
+
+		local sz = basePart.Size
+		local maxAxis = math.max(sz.X, sz.Y, sz.Z)
+		local isBeam = (label == "fx_beam1" or label == "fx_beam2" or label == "fx_bcore1" or label == "fx_bcore2")
+		if isBeam then
+			if math.max(sz.X, sz.Y) > 1.5 or sz.Z > AG_CONFIG.ForeignUKMaxBeamLength then
+				return false, nil
+			end
+		elseif maxAxis > AG_CONFIG.ForeignUKMaxSize then
+			return false, nil
+		end
+
+		if not basePart.Anchored or basePart.AssemblyLinearVelocity.Magnitude > 25 then
+			return false, nil
+		end
+		if basePart.CanCollide and basePart.Position.Y <= 10000 then
+			return false, nil
+		end
+
+		local bucket = Runtime.foreignUKPartsByUid[uid]
+		if not bucket then
+			bucket = setmetatable({}, { __mode = "k" })
+			Runtime.foreignUKPartsByUid[uid] = bucket
+		end
+
+		if not bucket[basePart] then
+			if getForeignUKPartCount(uid) >= AG_CONFIG.ForeignUKMaxPartsPerPlayer then
+				return false, nil
+			end
+			bucket[basePart] = true
+		end
+
+		return true, owner
+	end
+
+	local function hasActiveForeignUKParts(uid)
+		return getForeignUKPartCount(uid) > 0
 	end
 
 	local function isWhitelistedPlayerNearby(pos, radius)
@@ -818,7 +927,11 @@ return function(ctx)
 		local valid = {}
 		local seen = {}
 		for _, obj in ipairs(objects) do
-			if obj and not seen[obj] and obj.Parent ~= nil and not isProtectedWorldSystem(obj) and not isOwnRigPart(obj) and not isOwnCoreCharacterHelper(obj) then
+			if obj and not seen[obj] and obj.Parent ~= nil
+				and not isProtectedWorldSystem(obj)
+				and not isOwnRigPart(obj)
+				and not isOwnCoreCharacterHelper(obj)
+				and not isVerifiedForeignUKPart(obj) then
 				seen[obj] = true
 				table.insert(valid, obj)
 			end
@@ -868,7 +981,7 @@ return function(ctx)
 	-- ========================================================================
 	local function quarantineInstanceLocally(inst)
 		if not agState.localQuarantine or not inst or not inst.Parent then return end
-		if isProtectedWorldSystem(inst) or isOwnRigPart(inst) or isOwnCoreCharacterHelper(inst) or Runtime.scriptManagedParts[inst] then return end
+		if isProtectedWorldSystem(inst) or isOwnRigPart(inst) or isOwnCoreCharacterHelper(inst) or Runtime.scriptManagedParts[inst] or isVerifiedForeignUKPart(inst) then return end
 
 		if inst:IsA("Sound") then
 			pcall(function()
@@ -1061,7 +1174,7 @@ return function(ctx)
 		local count = 0
 
 		for _, desc in ipairs(workspace:GetDescendants()) do
-			if not isProtectedWorldSystem(desc) and not Runtime.scriptManagedParts[desc] and not isOwnRigPart(desc) and not isOwnCoreCharacterHelper(desc) then
+			if not isProtectedWorldSystem(desc) and not Runtime.scriptManagedParts[desc] and not isOwnRigPart(desc) and not isOwnCoreCharacterHelper(desc) and not isVerifiedForeignUKPart(desc) then
 				local isChar = isPlayerCharacterDescendant(desc)
 				if not isChar then
 					if desc:IsA("BasePart") then
@@ -1125,7 +1238,7 @@ return function(ctx)
 
 		local addedParts, addedEffects = 0, 0
 		for _, desc in ipairs(workspace:GetDescendants()) do
-			if not isProtectedWorldSystem(desc) and not Runtime.scriptManagedParts[desc] and not isOwnRigPart(desc) and not isOwnCoreCharacterHelper(desc) then
+			if not isProtectedWorldSystem(desc) and not Runtime.scriptManagedParts[desc] and not isOwnRigPart(desc) and not isOwnCoreCharacterHelper(desc) and not isVerifiedForeignUKPart(desc) then
 				local isChar = isPlayerCharacterDescendant(desc)
 				if not isChar then
 					if desc:IsA("BasePart") and not snap.parts[desc] then
@@ -1217,7 +1330,7 @@ return function(ctx)
 		end
 
 		for _, desc in ipairs(workspace:GetDescendants()) do
-			if not isProtectedWorldSystem(desc) and not Runtime.scriptManagedParts[desc] and not isOwnRigPart(desc) and not isOwnCoreCharacterHelper(desc) then
+			if not isProtectedWorldSystem(desc) and not Runtime.scriptManagedParts[desc] and not isOwnRigPart(desc) and not isOwnCoreCharacterHelper(desc) and not isVerifiedForeignUKPart(desc) then
 				local isChar = isPlayerCharacterDescendant(desc)
 				if not isChar then
 					if desc:IsA("BasePart") and not snap.parts[desc] then
@@ -1246,7 +1359,7 @@ return function(ctx)
 
 	local function isSuspiciousPart(part, strictMode)
 		if not part or not part:IsA("BasePart") then return false, nil end
-		if isProtectedWorldSystem(part) or Runtime.scriptManagedParts[part] or isOwnRigPart(part) or isOwnCoreCharacterHelper(part) then return false, nil end
+		if isProtectedWorldSystem(part) or Runtime.scriptManagedParts[part] or isOwnRigPart(part) or isOwnCoreCharacterHelper(part) or isVerifiedForeignUKPart(part) then return false, nil end
 
 		local isChar, charPlr = isPlayerCharacterDescendant(part)
 		if isChar then
@@ -1326,7 +1439,7 @@ return function(ctx)
 
 	local function isSpamEffect(inst)
 		if not inst or not inst.Parent then return false end
-		if isProtectedWorldSystem(inst) or Runtime.scriptManagedParts[inst] or isOwnRigPart(inst) or isOwnCoreCharacterHelper(inst) then return false end
+		if isProtectedWorldSystem(inst) or Runtime.scriptManagedParts[inst] or isOwnRigPart(inst) or isOwnCoreCharacterHelper(inst) or isVerifiedForeignUKPart(inst) then return false end
 
 		local isChar, charPlr = isPlayerCharacterDescendant(inst)
 		if isChar then
@@ -1388,14 +1501,16 @@ return function(ctx)
 		local checkParts = (mode ~= "Effects Only") or includeForeignParts
 
 		for _, desc in ipairs(workspace:GetDescendants()) do
-			if isSpamEffect(desc) then
-				quarantineInstanceLocally(desc)
-				table.insert(toRemove, desc)
-			elseif checkParts and desc:IsA("BasePart") then
-				local bad = isSuspiciousPart(desc, strict)
-				if bad then
+			if not isVerifiedForeignUKPart(desc) then
+				if isSpamEffect(desc) then
 					quarantineInstanceLocally(desc)
 					table.insert(toRemove, desc)
+				elseif checkParts and desc:IsA("BasePart") then
+					local bad = isSuspiciousPart(desc, strict)
+					if bad then
+						quarantineInstanceLocally(desc)
+						table.insert(toRemove, desc)
+					end
 				end
 			end
 		end
@@ -1417,7 +1532,7 @@ return function(ctx)
 		local r = radius or AG_CONFIG.ClearRadius
 
 		for _, desc in ipairs(workspace:GetDescendants()) do
-			if not isProtectedWorldSystem(desc) and not Runtime.scriptManagedParts[desc] and not isOwnRigPart(desc) and not isOwnCoreCharacterHelper(desc) then
+			if not isProtectedWorldSystem(desc) and not Runtime.scriptManagedParts[desc] and not isOwnRigPart(desc) and not isOwnCoreCharacterHelper(desc) and not isVerifiedForeignUKPart(desc) then
 				local isChar = isPlayerCharacterDescendant(desc)
 				if not isChar then
 					local inSnap = snap and (snap.parts[desc] or snap.effects[desc] or snap.meshes[desc] or snap.joints[desc])
@@ -1667,7 +1782,7 @@ return function(ctx)
 			end
 		else
 			for _, desc in ipairs(workspace:GetDescendants()) do
-				if desc:IsA("BasePart") and not isProtectedWorldSystem(desc) and not isPlayerCharacterDescendant(desc) and not isOwnRigPart(desc) then
+				if desc:IsA("BasePart") and not isProtectedWorldSystem(desc) and not isPlayerCharacterDescendant(desc) and not isOwnRigPart(desc) and not isVerifiedForeignUKPart(desc) then
 					table.insert(targets, desc)
 				end
 			end
@@ -2058,21 +2173,35 @@ return function(ctx)
 	-- ========================================================================
 	-- WORKSPACE & PLAYER MONITORING
 	-- ========================================================================
-	trackConn(workspace.DescendantAdded:Connect(function(desc)
-		if not agAlive then return end
-
-		if isRigDeployGraceActive() then
-			if not isProtectedWorldSystem(desc) and not isPlayerCharacterDescendant(desc) then
-				Runtime.protectedRigInstances[desc] = true
+	local function isImmediateDangerPart(part)
+		if not (part and part:IsA("BasePart") and part.Parent) then return false end
+		local sz = part.Size
+		local maxAxis = math.max(sz.X, sz.Y, sz.Z)
+		if maxAxis >= AG_CONFIG.GiantSizeThreshold then return true end
+		local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			local dist = (part.Position - hrp.Position).Magnitude
+			if (part:IsA("Seat") or part:IsA("VehicleSeat")) and dist <= AG_CONFIG.TrapCheckRadius then
+				return true
 			end
-			return
+			if dist <= 16 and part.CanCollide and part.Position.Y <= 10000 then
+				return true
+			end
+			if not part.Anchored and dist <= 22 and part.AssemblyLinearVelocity.Magnitude > 28 then
+				return true
+			end
 		end
+		return false
+	end
 
+	local function handleForeignSpawnCheck(desc)
+		if not agAlive or not desc or not desc.Parent then return end
 		if Runtime.selfRestoringDepth > 0 or Runtime.scriptManagedParts[desc] or isOwnRigPart(desc) or isOwnCoreCharacterHelper(desc) then return end
-		if isProtectedWorldSystem(desc) then return end
+		if isProtectedWorldSystem(desc) or isVerifiedForeignUKPart(desc) then return end
 
 		local isForeignPart = desc:IsA("BasePart")
 		local snap = getActiveSnapshot()
+
 		if isForeignPart and not isPlayerCharacterDescendant(desc) and (not snap or not snap.parts[desc]) then
 			table.insert(Runtime.recentForeignBuffer, { t = os.clock(), part = desc })
 			local rate, burst = getFloodBurstAndPrune()
@@ -2080,7 +2209,10 @@ return function(ctx)
 				if not isWhitelistedPlayerNearby(desc.Position, 32) then
 					for _, bEntry in ipairs(burst) do
 						local bp = bEntry.part
-						if bp and bp.Parent ~= nil and not Runtime.pendingRemove[bp] and (not snap or not snap.parts[bp]) and not isOwnRigPart(bp) then
+						if bp and bp.Parent ~= nil and not Runtime.pendingRemove[bp]
+							and (not snap or not snap.parts[bp])
+							and not isOwnRigPart(bp)
+							and not isVerifiedForeignUKPart(bp) then
 							if not isWhitelistedPlayerNearby(bp.Position, 32) then
 								quarantineInstanceLocally(bp)
 								Runtime.pendingRemove[bp] = true
@@ -2107,11 +2239,51 @@ return function(ctx)
 				attributeThreat(desc.Position, (reason == "Seat Trap" or reason == "Oversized Block") and 4 or 2, reason)
 			end
 		end
+	end
+
+	trackConn(workspace.DescendantAdded:Connect(function(desc)
+		if not agAlive then return end
+
+		if isRigDeployGraceActive() then
+			if not isProtectedWorldSystem(desc) and not isPlayerCharacterDescendant(desc) then
+				Runtime.protectedRigInstances[desc] = true
+			end
+			return
+		end
+
+		if Runtime.selfRestoringDepth > 0 or Runtime.scriptManagedParts[desc] or isOwnRigPart(desc) or isOwnCoreCharacterHelper(desc) then return end
+		if isProtectedWorldSystem(desc) then return end
+
+		-- Aguarda janela curta de replicacao para SetName/SyncCollision de outros usuarios ULTRAKILL, exceto ameacas imediatas
+		if agState.trustOtherUKRigs and not isVerifiedForeignUKPart(desc) then
+			local shouldDefer = false
+			if desc:IsA("BasePart") then
+				if not isPlayerCharacterDescendant(desc) and not isImmediateDangerPart(desc) then
+					shouldDefer = true
+				end
+			elseif FOREIGN_UK_ALLOWED_CHILD_CLASSES[desc.ClassName] then
+				local parentPart = desc:FindFirstAncestorWhichIsA("BasePart")
+				if parentPart and not isPlayerCharacterDescendant(parentPart) then
+					shouldDefer = true
+				end
+			end
+
+			if shouldDefer then
+				task.delay(AG_CONFIG.ForeignUKVerifyGrace, function()
+					if agAlive and desc and desc.Parent and not isVerifiedForeignUKPart(desc) then
+						handleForeignSpawnCheck(desc)
+					end
+				end)
+				return
+			end
+		end
+
+		handleForeignSpawnCheck(desc)
 	end))
 
 	trackConn(workspace.DescendantRemoving:Connect(function(desc)
 		if not agAlive or not agState.liveGuard or Runtime.selfRestoringDepth > 0 or isRigDeployGraceActive() then return end
-		if isOwnRigPart(desc) or isOwnCoreCharacterHelper(desc) then return end
+		if isOwnRigPart(desc) or isOwnCoreCharacterHelper(desc) or isVerifiedForeignUKPart(desc) then return end
 		local snap = getActiveSnapshot()
 		if not snap then return end
 		if snap.parts[desc] then
@@ -2181,6 +2353,7 @@ return function(ctx)
 	trackConn(Players.PlayerRemoving:Connect(function(p)
 		registerCharacter(p, nil)
 		Runtime.cagedPartsByUserId[p.UserId] = nil
+		Runtime.foreignUKPartsByUid[p.UserId] = nil
 		agState.threatScores[p.UserId] = nil
 		agState.lastCounterTime[p.UserId] = nil
 		if UI.refreshRadar and agState.windowOpen then task.defer(UI.refreshRadar) end
@@ -2264,7 +2437,7 @@ return function(ctx)
 							local batch = {}
 							for inst in pairs(Runtime.pendingRemove) do
 								Runtime.pendingRemove[inst] = nil
-								if inst and inst.Parent ~= nil and not isOwnRigPart(inst) and not isOwnCoreCharacterHelper(inst) then
+								if inst and inst.Parent ~= nil and not isOwnRigPart(inst) and not isOwnCoreCharacterHelper(inst) and not isVerifiedForeignUKPart(inst) then
 									table.insert(batch, inst)
 								end
 							end
@@ -2416,7 +2589,7 @@ return function(ctx)
 				end)
 				if okSpatial and nearby then
 					for _, desc in ipairs(nearby) do
-						if desc:IsA("BasePart") and not desc.Anchored and not isOwnRigPart(desc) and not isOwnCoreCharacterHelper(desc) and not Runtime.scriptManagedParts[desc] then
+						if desc:IsA("BasePart") and not desc.Anchored and not isOwnRigPart(desc) and not isOwnCoreCharacterHelper(desc) and not Runtime.scriptManagedParts[desc] and not isVerifiedForeignUKPart(desc) then
 							local isChar, pOwner = isPlayerCharacterDescendant(desc)
 							if isChar and pOwner and pOwner ~= LocalPlayer and not agState.whitelist[pOwner.UserId] then
 								if desc.AssemblyLinearVelocity.Magnitude > 85 or desc.AssemblyAngularVelocity.Magnitude > 35 then
@@ -2966,11 +3139,19 @@ return function(ctx)
 		Engine.logEvent("Auto-Clean " .. (on and "ENABLED" or "DISABLED"), "INFO")
 	end)
 
-	makeAGToggle(agShieldPage, "Local Anti-Lag / Quarantine", agState.localQuarantine, 4, function(on)
+	makeAGToggle(agShieldPage, "Trust Other ULTRAKILL Rigs", agState.trustOtherUKRigs, 4, function(on)
+		agState.trustOtherUKRigs = on
+		Engine.logEvent("Other UK Rigs " .. (on and "TRUSTED" or "BLOCKED"), "INFO")
+		if agState.windowOpen and UI.refreshRadar then
+			UI.refreshRadar()
+		end
+	end)
+
+	makeAGToggle(agShieldPage, "Local Anti-Lag / Quarantine", agState.localQuarantine, 5, function(on)
 		agState.localQuarantine = on
 	end)
 
-	local ModeBtn, ModeLbl = makeAGButton(agShieldPage, "FILTER: " .. getFilterMode():upper(), false, SMILE.InfoBlue, 5, 28)
+	local ModeBtn, ModeLbl = makeAGButton(agShieldPage, "FILTER: " .. getFilterMode():upper(), false, SMILE.InfoBlue, 6, 28)
 	ModeBtn.Activated:Connect(function()
 		agState.filterModeIndex = (agState.filterModeIndex % #FILTER_MODES) + 1
 		local mode = getFilterMode()
@@ -2979,11 +3160,11 @@ return function(ctx)
 		UI.updateTelemetry()
 	end)
 
-	makeAGToggle(agShieldPage, "Char + Joint + Seat Shield", agState.charShield, 6, function(on)
+	makeAGToggle(agShieldPage, "Char + Joint + Seat Shield", agState.charShield, 7, function(on)
 		agState.charShield = on
 	end)
 
-	makeAGToggle(agShieldPage, "Auto-Lock Self on Spawn", agState.autoLockSelf, 7, function(on)
+	makeAGToggle(agShieldPage, "Auto-Lock Self on Spawn", agState.autoLockSelf, 8, function(on)
 		agState.autoLockSelf = on
 		if on then
 			task.spawn(function()
@@ -2994,19 +3175,19 @@ return function(ctx)
 		end
 	end)
 
-	makeAGToggle(agShieldPage, "Anti-Fling & Velocity Clamp", agState.antiFling, 8, function(on)
+	makeAGToggle(agShieldPage, "Anti-Fling & Velocity Clamp", agState.antiFling, 9, function(on)
 		agState.antiFling = on
 	end)
 
-	makeAGToggle(agShieldPage, "Anti-Void + Smart Rescue", agState.antiVoid, 9, function(on)
+	makeAGToggle(agShieldPage, "Anti-Void + Smart Rescue", agState.antiVoid, 10, function(on)
 		agState.antiVoid = on
 	end)
 
-	makeAGToggle(agShieldPage, "Auto-Equip F3X on Action", agState.autoEquipF3X, 10, function(on)
+	makeAGToggle(agShieldPage, "Auto-Equip F3X on Action", agState.autoEquipF3X, 11, function(on)
 		agState.autoEquipF3X = on
 	end)
 
-	makeAGToggle(agShieldPage, "Auto-Counter Repeat Griefers", agState.autoCounter, 11, function(on)
+	makeAGToggle(agShieldPage, "Auto-Counter Repeat Griefers", agState.autoCounter, 12, function(on)
 		agState.autoCounter = on
 		Engine.logEvent("Auto-Counter " .. (on and "ARMED" or "OFF"), on and "COUNTER" or "INFO")
 	end)
@@ -3014,7 +3195,7 @@ return function(ctx)
 	local LockSelfRow = Instance.new("Frame")
 	LockSelfRow.Size = UDim2.new(1, 0, 0, 28)
 	LockSelfRow.BackgroundTransparency = 1
-	LockSelfRow.LayoutOrder = 12
+	LockSelfRow.LayoutOrder = 13
 	LockSelfRow.ZIndex = 4
 	LockSelfRow.Parent = agShieldPage
 
@@ -3049,7 +3230,7 @@ return function(ctx)
 		agState.isBusy = false
 	end)
 
-	local PadBtn = makeAGButton(agShieldPage, "SPAWN RESCUE BASEPLATE", false, SMILE.BevelDark, 13, 28)
+	local PadBtn = makeAGButton(agShieldPage, "SPAWN RESCUE BASEPLATE", false, SMILE.BevelDark, 14, 28)
 	PadBtn.Activated:Connect(function()
 		if agState.isBusy then return end
 		agState.isBusy = true
@@ -3260,14 +3441,17 @@ return function(ctx)
 		for _, plr in ipairs(Players:GetPlayers()) do
 			if plr ~= LocalPlayer then
 				local hasF3X, equipped = playerHasF3X(plr)
+				local hasUK = hasActiveForeignUKParts(plr.UserId)
 				local score = agState.threatScores[plr.UserId] or 0
 				local priority = (agState.blacklist[plr.UserId] and 10000 or 0)
 					+ (score * 10)
 					+ (equipped and 500 or (hasF3X and 100 or 0))
+					+ (hasUK and 50 or 0)
 				table.insert(entries, {
 					plr = plr,
 					hasF3X = hasF3X,
 					equipped = equipped,
+					hasUK = hasUK,
 					score = score,
 					priority = priority,
 				})
@@ -3284,7 +3468,7 @@ return function(ctx)
 		local order = 2
 		for _, entry in ipairs(entries) do
 			local plr = entry.plr
-			local hasF3X, equipped, score = entry.hasF3X, entry.equipped, entry.score
+			local hasF3X, equipped, hasUK, score = entry.hasF3X, entry.equipped, entry.hasUK, entry.score
 			local isWL = agState.whitelist[plr.UserId] == true
 			local isBL = agState.blacklist[plr.UserId] == true
 			local isCaged = Runtime.cagedPartsByUserId[plr.UserId] ~= nil
@@ -3316,11 +3500,12 @@ return function(ctx)
 			nameLbl.Font = Enum.Font.Code
 			nameLbl.TextSize = 10
 			local tag = equipped and " [F3X HELD]" or (hasF3X and " [F3X]" or "")
+			if hasUK then tag ..= " [UK]" end
 			if score > 0 then tag ..= (" [T:%d]"):format(score) end
 			if isWL then tag ..= " [WL]" end
 			if isBL then tag ..= " [BL]" end
 			nameLbl.Text = plr.DisplayName .. " (@" .. plr.Name .. ")" .. tag
-			nameLbl.TextColor3 = (isBL or equipped) and SMILE.TextLight or (hasF3X and SMILE.AccentGold or SMILE.TextLight)
+			nameLbl.TextColor3 = (isBL or equipped) and SMILE.TextLight or (hasUK and SMILE.InfoBlue or (hasF3X and SMILE.AccentGold or SMILE.TextLight))
 			nameLbl.TextXAlignment = Enum.TextXAlignment.Left
 			nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
 			nameLbl.ZIndex = 7
@@ -3674,6 +3859,7 @@ return function(ctx)
 		end
 		table.clear(agConnections)
 		table.clear(Runtime.protectedRigInstances)
+		table.clear(Runtime.foreignUKPartsByUid)
 		table.clear(Runtime.cagedPartsByUserId)
 		table.clear(Runtime.charRootSet)
 		if AGWindow and AGWindow.Parent then

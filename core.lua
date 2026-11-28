@@ -16,6 +16,9 @@ local C, V = CFrame.new, Vector3.new
 local ID_CF = C()
 local PARK_CF = C(0, 25000, 0)
 
+local USER_ID_NUM = plr and plr.UserId or 0
+local USER_TAG_PREFIX = "UKF3X_" .. tostring(USER_ID_NUM) .. "_"
+
 local function rad(x) return math.rad(x) end
 local function clamp(x, a, b) return (x < a and a) or (x > b and b) or x end
 local function lerp(a, b, t) return a + (b - a) * t end
@@ -65,11 +68,30 @@ local function mergeTables(base, over)
 	return o
 end
 
+local function sanitizeTagLabel(label)
+	local raw = tostring(label or "PART"):gsub("[^%w_%-]", "_")
+	if raw == "" then raw = "PART" end
+	if #raw > 28 then raw = raw:sub(1, 28) end
+	return raw
+end
+
+local function makeUserPartName(label)
+	return USER_TAG_PREFIX .. sanitizeTagLabel(label)
+end
+
+local function parseUserTag(name)
+	if type(name) ~= "string" then return nil, nil end
+	local uidStr, label = name:match("^UKF3X_(%-?%d+)_(.+)$")
+	if not uidStr then return nil, nil end
+	return tonumber(uidStr), label
+end
+
 local Core = {
 	C = C,
 	V = V,
 	ID_CF = ID_CF,
 	PARK_CF = PARK_CF,
+	USER_TAG_PREFIX = USER_TAG_PREFIX,
 	rad = rad,
 	clamp = clamp,
 	lerp = lerp,
@@ -77,7 +99,13 @@ local Core = {
 	easeOutBack = easeOutBack,
 	angles = angles,
 	mirrorRelCF = mirrorRelCF,
+	makeUserPartName = makeUserPartName,
+	parseUserTag = parseUserTag,
 }
+
+function Core.getUserTagPrefix()
+	return USER_TAG_PREFIX
+end
 
 -- ============================================================================
 -- PONTE DE PROTECAO PARA O ANTIGRIEF.LUA (SEM DEPENDER DO LOADER.LUA)
@@ -392,7 +420,48 @@ function Core.getConfig() return CONFIG end
 function Core.getChar() return getChar() end
 function Core.getEndpoint() return (STATE and STATE.ep and STATE.ep.Parent and STATE.ep) or getF3XEndpoint() end
 
--- Protege automaticamente qualquer part/clone criado por scripts de personagem via Core.f3x
+-- Marca partes criadas com o identificador multiusuario UKF3X_<UserId>_<Label>
+function Core.tagPart(target, label)
+	if not target then return end
+	local nameList = {}
+	local defaultTag = makeUserPartName(label or "PART")
+
+	if typeof(target) == "Instance" then
+		if target:IsA("BasePart") then
+			local uid = parseUserTag(target.Name)
+			if uid ~= USER_ID_NUM then
+				pcall(function() target.Name = defaultTag end)
+				nameList[#nameList + 1] = { Part = target, Name = defaultTag }
+			end
+		end
+	elseif type(target) == "table" then
+		for _, item in pairs(target) do
+			if typeof(item) == "Instance" and item:IsA("BasePart") then
+				local uid = parseUserTag(item.Name)
+				if uid ~= USER_ID_NUM then
+					local tagName = label and defaultTag or makeUserPartName(item.Name)
+					pcall(function() item.Name = tagName end)
+					nameList[#nameList + 1] = { Part = item, Name = tagName }
+				end
+			end
+		end
+	end
+
+	if #nameList == 0 then return end
+	local ep = Core.getEndpoint()
+	if not ep then return end
+
+	task.spawn(function()
+		local chunkSize = (CONFIG and CONFIG.SYNC_CHUNK) or 120
+		for _, ch in ipairs(chunked(nameList, chunkSize)) do
+			if ep and ep.Parent then
+				f3x(ep, "SetName", ch)
+			end
+		end
+	end)
+end
+
+-- Protege e etiqueta automaticamente qualquer part/clone criado por scripts de personagem via Core.f3x
 function Core.f3x(cmd, ...)
 	local isSpawnCmd = (cmd == "CreatePart" or cmd == "Clone")
 	if isSpawnCmd then
@@ -401,6 +470,7 @@ function Core.f3x(cmd, ...)
 	local ok, res = f3x(Core.getEndpoint(), cmd, ...)
 	if isSpawnCmd and ok and res then
 		agProtect(res)
+		Core.tagPart(res, (cmd == "Clone") and "CLONE" or "FX")
 	end
 	return ok, res
 end
@@ -2439,7 +2509,7 @@ setupRig = function()
 			end)
 		end
 
-		local resizeItems, colorItems, matItems, anchorItems, colItems = {}, {}, {}, {}, {}
+		local resizeItems, colorItems, matItems, anchorItems, colItems, nameItems = {}, {}, {}, {}, {}, {}
 		local createMeshItems, syncMeshQueue, createLightItems, syncLightQueue = {}, {}, {}, {}
 		local hideMatItems, hideTexItems, createdThisSetup = {}, {}, {}
 
@@ -2489,6 +2559,11 @@ setupRig = function()
 		specs[#specs + 1] = { kind = "fx_impact", partType = "Ball",     origCF = PARK_CF, origSize = V(1.6, 1.6, 1.6),    origColor = CONFIG.BEAM_CYAN,   origMaterial = Enum.Material.Neon, origTrans = 1, origReflectance = 0 }
 		specs[#specs + 1] = { kind = "fx_ring",   partType = "Cylinder", origCF = PARK_CF, origSize = V(0.14, 1.6, 1.6),   origColor = CONFIG.BEAM_CYAN,   origMaterial = Enum.Material.Neon, origTrans = 1, origReflectance = 0 }
 
+		for i, spec in ipairs(specs) do
+			local suffix = spec.tag or spec.limbName or spec.kind or tostring(i)
+			spec.userPartName = makeUserPartName(suffix)
+		end
+
 		local function spawnSpecsBatch(specList)
 			agMarkGrace(12)
 			local tasks = {}
@@ -2500,9 +2575,20 @@ setupRig = function()
 						agProtect(p)
 						lockProxyPhysics(p)
 						attachNoColToCharacter(p, c)
+						pcall(function() p.Name = spec.userPartName end)
 						createdThisSetup[#createdThisSetup + 1] = p
 						STATE.proxyParts[#STATE.proxyParts + 1] = p
 						spec.newPart = p
+
+						-- Etiqueta imediatamente em background para outros Anti-Griefs reconhecerem antes mesmo do setup acabar
+						task.spawn(function()
+							if p and p.Parent and ep and ep.Parent then
+								local okName = f3x(ep, "SetName", { { Part = p, Name = spec.userPartName } })
+								if okName then
+									spec.namedOnServer = true
+								end
+							end
+						end)
 					end
 				end
 			end
@@ -2534,6 +2620,10 @@ setupRig = function()
 			if p and p.Parent then
 				agProtect(p)
 				lockProxyPhysics(p)
+				pcall(function() p.Name = spec.userPartName end)
+				if not spec.namedOnServer then
+					nameItems[#nameItems + 1] = { Part = p, Name = spec.userPartName }
+				end
 				resizeItems[#resizeItems + 1] = { Part = p, Size = spec.origSize, CFrame = spec.origCF }
 				colorItems[#colorItems + 1] = { Part = p, Color = spec.origColor, UnionColoring = true }
 				matItems[#matItems + 1] = { Part = p, Material = spec.origMaterial, Transparency = spec.origTrans or 0, Reflectance = spec.origReflectance or 0 }
@@ -2565,6 +2655,7 @@ setupRig = function()
 		end
 
 		local lockTasks = {}
+		for _, ch in ipairs(chunked(nameItems, CONFIG.SYNC_CHUNK)) do lockTasks[#lockTasks + 1] = function() f3x(ep, "SetName", ch) end end
 		for _, ch in ipairs(chunked(anchorItems, CONFIG.SYNC_CHUNK)) do lockTasks[#lockTasks + 1] = function() f3x(ep, "SyncAnchor", ch) end end
 		for _, ch in ipairs(chunked(colItems, CONFIG.SYNC_CHUNK)) do lockTasks[#lockTasks + 1] = function() f3x(ep, "SyncCollision", ch) end end
 		runParallelBatched(lockTasks, CONFIG.MAX_CREATE_WORKERS, 6)
@@ -2635,8 +2726,8 @@ setupRig = function()
 
 		if CHAR_DEF.onSetupComplete then CHAR_DEF.onSetupComplete(Core) end
 		startBGM(CONFIG.BGM_URL, CONFIG.BGM_FILE, CONFIG.BGM_FALLBACK_ID, CONFIG.BGM_VOLUME, CONFIG.BGM_PITCH)
-		print(string.format("[F3X Ultrakill - %s] Ready (%s): %d/%d parts | Verified=%d | Mode=TorsoKill",
-			tostring(CHAR_DEF.name or CHAR_DEF.id), STATE.rigType, #STATE.proxyParts, #specs, verifiedCount))
+		print(string.format("[F3X Ultrakill - %s] Ready (%s): %d/%d parts | Verified=%d | Tag=%s | Mode=TorsoKill",
+			tostring(CHAR_DEF.name or CHAR_DEF.id), STATE.rigType, #STATE.proxyParts, #specs, verifiedCount, USER_TAG_PREFIX))
 
 		clearCharConnections()
 		table.insert(STATE.charConnections, hum.Died:Connect(function()
@@ -2803,6 +2894,9 @@ function Core.start(charDef)
 	env.ULTRAKILL_F3X = {
 		cleanup = cleanup,
 		rebuild = forceRebuild,
+		userTagPrefix = USER_TAG_PREFIX,
+		tagPart = Core.tagPart,
+		parseUserTag = parseUserTag,
 		getProtectedParts = function()
 			local out = {}
 			if STATE and STATE.alive then
