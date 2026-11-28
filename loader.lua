@@ -285,11 +285,30 @@ local function createSmileyIcon(parent, sizePx, pos, bgCol, faceCol)
 	return box
 end
 
-local function makeDraggable(handle, window)
+local function getScreenSize(gui)
+	if gui and gui.AbsoluteSize.X > 0 and gui.AbsoluteSize.Y > 0 then
+		return gui.AbsoluteSize
+	end
+	local cam = workspace.CurrentCamera
+	return (cam and cam.ViewportSize) or Vector2.new(1280, 720)
+end
+
+local function clampWindowToScreen(window, gui)
+	local vp = getScreenSize(gui)
+	local absW, absH = window.AbsoluteSize.X, window.AbsoluteSize.Y
+	local curX = window.Position.X.Scale * vp.X + window.Position.X.Offset
+	local curY = window.Position.Y.Scale * vp.Y + window.Position.Y.Offset
+	local maxX = math.max(0, vp.X - absW)
+	local maxY = math.max(0, vp.Y - absH)
+	window.Position = UDim2.fromOffset(math.clamp(curX, 0, maxX), math.clamp(curY, 0, maxY))
+end
+
+local function makeDraggable(handle, window, gui)
 	local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
 	trackConn(handle.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
+			dragInput = input
 			dragStart = input.Position
 			startPos = window.Position
 			input.Changed:Connect(function()
@@ -304,16 +323,20 @@ local function makeDraggable(handle, window)
 			dragInput = input
 		end
 	end))
+	trackConn(UserInputService.InputEnded:Connect(function(input)
+		if input == dragInput then
+			dragging = false
+		end
+	end))
 	trackConn(UserInputService.InputChanged:Connect(function(input)
-		if input == dragInput and dragging then
+		if dragging and (input == dragInput or (dragInput and dragInput.UserInputType == Enum.UserInputType.MouseButton1 and input.UserInputType == Enum.UserInputType.MouseMovement)) then
 			local delta = input.Position - dragStart
-			local cam = workspace.CurrentCamera
-			local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+			local vp = getScreenSize(gui)
 			local absW, absH = window.AbsoluteSize.X, window.AbsoluteSize.Y
 			local baseX = startPos.X.Scale * vp.X + startPos.X.Offset + delta.X
 			local baseY = startPos.Y.Scale * vp.Y + startPos.Y.Offset + delta.Y
-			local clampedX = math.clamp(baseX, 4, math.max(4, vp.X - absW - 4))
-			local clampedY = math.clamp(baseY, 4, math.max(4, vp.Y - absH - 4))
+			local clampedX = math.clamp(baseX, 0, math.max(0, vp.X - absW))
+			local clampedY = math.clamp(baseY, 0, math.max(0, vp.Y - absH))
 			window.Position = UDim2.fromOffset(clampedX, clampedY)
 		end
 	end))
@@ -325,23 +348,58 @@ end
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "ULTRAKILL_F3X_TERMINAL"
 ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+pcall(function()
+	ScreenGui.ScreenInsets = Enum.ScreenInsets.None
+end)
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.Parent = guiParent
 
 local FULL_WIDTH, FULL_HEIGHT = 560, 412
 local COLLAPSED_HEIGHT = 30
 
+local function computeWindowScale()
+	local vp = getScreenSize(ScreenGui)
+	local isCompact = UserInputService.TouchEnabled or vp.X < 760 or vp.Y < 540
+	local fitScale = math.min((vp.X - 24) / FULL_WIDTH, (vp.Y - 24) / FULL_HEIGHT)
+	if isCompact then
+		return math.clamp(fitScale, 0.48, 0.80)
+	end
+	return math.clamp(fitScale, 0.65, 1.0)
+end
+
+local initialScale = computeWindowScale()
+local initialVp = getScreenSize(ScreenGui)
+
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "TerminalWindow"
 MainFrame.Size = UDim2.fromOffset(FULL_WIDTH, 16)
-MainFrame.Position = UDim2.new(0.5, -FULL_WIDTH / 2, 0.5, -FULL_HEIGHT / 2)
+MainFrame.Position = UDim2.fromOffset(
+	math.max(0, math.floor((initialVp.X - FULL_WIDTH * initialScale) * 0.5)),
+	math.max(0, math.floor((initialVp.Y - FULL_HEIGHT * initialScale) * 0.5))
+)
 MainFrame.BackgroundColor3 = SMILE.WinFace
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.ClipsDescendants = true
 MainFrame.Parent = ScreenGui
+
+local MainScale = Instance.new("UIScale")
+MainScale.Scale = initialScale
+MainScale.Parent = MainFrame
+
 local mainBevel = createBevel(MainFrame, false, 2)
 addOutline(MainFrame, SMILE.BorderOuter, 1)
+
+trackConn(ScreenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+	if not terminalAlive or not MainScale or not MainScale.Parent then return end
+	MainScale.Scale = computeWindowScale()
+	task.defer(function()
+		if terminalAlive and MainFrame and MainFrame.Parent then
+			clampWindowToScreen(MainFrame, ScreenGui)
+		end
+	end)
+end))
 
 -- Title Bar (XP-style SmileOS 2.0 Crimson Gradient)
 local TitleBar = Instance.new("Frame")
@@ -350,6 +408,7 @@ TitleBar.Size = UDim2.new(1, -4, 0, 26)
 TitleBar.Position = UDim2.fromOffset(2, 2)
 TitleBar.BackgroundColor3 = SMILE.HeaderTop
 TitleBar.BorderSizePixel = 0
+TitleBar.Active = true
 TitleBar.ZIndex = 3
 TitleBar.Parent = MainFrame
 
@@ -381,8 +440,8 @@ TitleText.Parent = TitleBar
 -- Classic OS Caption Buttons (_, X)
 local function makeCaptionButton(text, posOffset, isClose)
 	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.fromOffset(20, 18)
-	btn.Position = UDim2.new(1, posOffset, 0, 4)
+	btn.Size = UDim2.fromOffset(24, 20)
+	btn.Position = UDim2.new(1, posOffset, 0, 3)
 	btn.BackgroundColor3 = isClose and Color3.fromRGB(215, 60, 56) or SMILE.BtnFace
 	btn.BorderSizePixel = 0
 	btn.Font = Enum.Font.GothamBold
@@ -407,8 +466,8 @@ local function makeCaptionButton(text, posOffset, isClose)
 	return btn
 end
 
-local MinBtn = makeCaptionButton("_", -46, false)
-local CloseBtn = makeCaptionButton("X", -23, true)
+local MinBtn = makeCaptionButton("_", -54, false)
+local CloseBtn = makeCaptionButton("X", -27, true)
 
 -- Body Container
 local Body = Instance.new("Frame")
@@ -510,7 +569,6 @@ local SideCountLbl = Instance.new("TextLabel")
 SideCountLbl.Size = UDim2.new(1, -8, 1, 0)
 SideCountLbl.BackgroundTransparency = 1
 SideCountLbl.Font = Enum.Font.Code
-SideHeader.ZIndex = 5
 SideCountLbl.TextSize = 11
 SideCountLbl.TextColor3 = SMILE.AccentGold
 SideCountLbl.TextXAlignment = Enum.TextXAlignment.Right
@@ -981,7 +1039,7 @@ local function logLine(msg, color)
 	end)
 end
 
-makeDraggable(TitleBar, MainFrame)
+makeDraggable(TitleBar, MainFrame, ScreenGui)
 
 local minimized = false
 MinBtn.Activated:Connect(function()
@@ -997,6 +1055,9 @@ MinBtn.Activated:Connect(function()
 		if minimized and MainFrame and MainFrame.Parent then
 			Body.Visible = false
 			Taskbar.Visible = false
+		end
+		if MainFrame and MainFrame.Parent then
+			clampWindowToScreen(MainFrame, ScreenGui)
 		end
 	end)
 	tw:Play()
